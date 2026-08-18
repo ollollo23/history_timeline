@@ -1,14 +1,29 @@
-from fastapi import Depends, FastAPI, HTTPException
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database.database import get_db
+from app.api.router import api_router
+from app.core.config.python_spec import verify_python_environment
 
-# Инициализация основного приложения FastAPI с заданным заголовком
-app = FastAPI(title="History Timeline API")
 
-# Конфигурация CORS для разрешения запросов с любых источников (локальное тестирование)
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Валидация соответствия версии Python 3.14.7 при старте приложения
+    verify_python_environment()
+    # Передача управления работающему приложению
+    yield
+    # Логика корректного освобождения ресурсов при остановке сервера (при необходимости)
+
+
+# Инициализация основного приложения FastAPI с подключением менеджера жизненного цикла
+app = FastAPI(
+    title="History Timeline API",
+    lifespan=lifespan,
+)
+
+# Конфигурация CORS для разрешения кросс-доменных запросов на этапе локальной разработки
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,19 +32,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/health")
-async def health_check(session: AsyncSession = Depends(get_db)) -> dict:
-    """
-    Диагностический эндпоинт для проверки статуса приложения и соединения с базой данных.
-    """
-    try:
-        # Выполнение легковесного запроса к PostgreSQL для валидации подключения
-        await session.execute(text("SELECT 1"))
-        return {"status": "ok", "db_connected": True}
-    except Exception as e:
-        # Перехват ошибки подключения и возврат корректного HTTP-ответа 500
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка подключения к базе данных: {str(e)}"
-        )
+# Подключение центрального маршрутизатора API с версионированием v1
+app.include_router(
+    api_router,
+    prefix="/api/v1",
+)

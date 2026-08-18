@@ -3,8 +3,8 @@ import os
 import sys
 from logging.config import fileConfig
 
-# Инъекция корневой директории проекта в sys.path для корректных импортов из пакета app
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Добавление корневой директории проекта в sys.path для корректных импортов пакета app
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -12,31 +12,28 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Импорт базового класса ORM-моделей и конфигурации настроек
-from app.core.database.database import Base
+# Импорт конфигурации приложения и декларативного базового класса с автогенерацией имен таблиц
 from app.core.config.config import Settings
+from app.models.base import Base
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# Получение объекта конфигурации Alembic из файла .ini
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# Настройка системного логирования на основе параметров из alembic.ini
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
+# Связывание метаданных базового класса моделей для работы автогенерации миграций
 target_metadata = Base.metadata
 
-# Инициализация настроек приложения для извлечения параметров подключения к PostgreSQL
+# Инициализация объекта настроек для получения динамического DSN подключения
 settings = Settings()
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode."""
+    """Запуск миграций в 'offline' режиме (генерация SQL-скрипта без прямого подключения)."""
 
-    # Динамическая установка URL базы данных перед запуском офлайн-миграций
+    # Динамическая передача URL базы данных из Pydantic Settings
     config.set_main_option("sqlalchemy.url", str(settings.database_url))
     url = config.get_main_option("sqlalchemy.url")
 
@@ -52,6 +49,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    """Выполнение миграций в контексте активного соединения."""
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():
@@ -59,11 +57,9 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """In this scenario we need to create an Engine
-    and associate a connection with the context.
-    """
+    """Асинхронная инициализация движка и применение миграций к PostgreSQL."""
 
-    # Перехват и динамическая установка URL базы данных перед конфигурацией движка
+    # Динамическая передача URL подключения перед сборкой асинхронного движка
     config.set_main_option("sqlalchemy.url", str(settings.database_url))
 
     connectable = async_engine_from_config(
@@ -79,7 +75,7 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
+    """Запуск миграций в 'online' режиме с асинхронным циклом событий."""
     asyncio.run(run_async_migrations())
 
 
