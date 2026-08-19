@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Импорт конфигурации приложения и декларативного базового класса с автогенерацией имен таблиц
+# Импорт конфигурации приложения и сущностей ORM для регистрации схемы в метаданных
 from app.core.config.config import Settings
-from app.models.base import Base
+from app.models import Base, Event
 
 # Получение объекта конфигурации Alembic из файла .ini
 config = context.config
@@ -23,7 +23,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Связывание метаданных базового класса моделей для работы автогенерации миграций
+# Связывание метаданных базового класса (выполняется строго после импорта всех моделей)
 target_metadata = Base.metadata
 
 # Инициализация объекта настроек для получения динамического DSN подключения
