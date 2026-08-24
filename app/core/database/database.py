@@ -1,43 +1,41 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.core.config.config import settings
 
-# Создание асинхронного движка для подключения к PostgreSQL
+# Создание асинхронного движка для подключения к PostgreSQL через драйвер asyncpg
 engine = create_async_engine(
     url=settings.database_url,
     echo=False,
 )
 
-# Создание фабрики сессий, привязанной к асинхронному движку
+# Фабрика асинхронных сессий с отключенным сбросом состояния объектов после фиксации транзакции
 async_session_maker = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False,  # Отключение истечения срока действия объектов после коммита
+    expire_on_commit=False,
 )
-
-
-# Базовый класс для всех ORM-моделей на основе современного стандарта SQLAlchemy 2.0+
-class Base(DeclarativeBase):
-    pass
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Асинхронный генератор зависимостей для получения сессии базы данных.
-    Выдает сессию эндпоинту, откатывает транзакцию при ошибке и закрывает сессию по завершении.
+    Асинхронный генератор зависимостей FastAPI для внедрения сессии базы данных.
+    Предоставляет изолированную сессию, выполняет откат при исключении и гарантированно закрывает соединение.
     """
     session: AsyncSession = async_session_maker()
     try:
-        # Передача сессии вызывающему коду (эндпоинту)
+        # Передача сессии вызывающему эндпоинту или сервисному слою
         yield session
     except Exception:
-        # Откат незавершенной транзакции в случае возникновения любой ошибки
+        # Автоматический откат незавершенной транзакции при возникновении сбоя
         await session.rollback()
-        # Проброс исключения дальше для обработки на уровне FastAPI
+        # Повторный выброс исключения для дальнейшей обработки на уровне FastAPI
         raise
     finally:
-        # Гарантированное закрытие сессии и возврат подключения в пул
+        # Гарантированное закрытие сессии и возврат соединения в пул asyncpg
         await session.close()

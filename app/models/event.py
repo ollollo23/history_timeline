@@ -1,4 +1,5 @@
-from sqlalchemy import BIGINT, Integer, JSON, String, Text
+from sqlalchemy import BIGINT, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -7,14 +8,13 @@ from app.models.base import Base
 class Event(Base):
     """
     ORM-модель сущности исторического события.
-    Хранит атрибуты временной шкалы, текстовые описания, категории и медиа-данные.
+    Хранит атрибуты временной шкалы, текстовые описания, категории и медиа-данные в формате JSONB.
     """
 
     # Уникальный первичный ключ события с индексом
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True,
-        index=True,
     )
 
     # Заголовок исторического события
@@ -50,9 +50,9 @@ class Event(Base):
         index=True,
     )
 
-    # Неструктурированные медиа-данные и метаинформация (JSON-объект или список)
+    # Неструктурированные медиа-данные в оптимизированном бинарном формате PostgreSQL JSONB
     media_payload: Mapped[dict | list | None] = mapped_column(
-        JSON,
+        JSONB,
         nullable=True,
     )
 

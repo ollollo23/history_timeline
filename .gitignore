@@ -2,7 +2,7 @@
 .venv/
 env/
 venv/
-.env
+
 
 # Байт-код и кэш Python
 __pycache__/
@@ -12,9 +12,10 @@ __pycache__/
 
 # Базы данных и миграции
 *.sqlite3
-alembic.ini
 
-# Системные файлы и IDE
+
+# Системные файлы, дампы и IDE
 .idea/
 .vscode/
 .DS_Store
+project_context.txt
