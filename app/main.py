@@ -5,21 +5,37 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.core.config.config import settings
 from app.core.config.python_spec import verify_python_environment
+from app.core.logger import logger, setup_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Валидация соответствия версии Python 3.14.7 при старте приложения
+    # Первичная инициализация подсистемы централизованного логирования
+    setup_logging()
+
+    # Валидация версии Python 3.14.7 перед выполнением основного рантайма
     verify_python_environment()
-    # Передача управления работающему приложению
+
+    # Фиксация события старта сервиса с параметрами конфигурации
+    logger.info(
+        "Запуск сервиса %s v%s на Python 3.14...",
+        settings.app_title,
+        settings.app_version,
+    )
+
+    # Передача управления работающему экземпляру приложения FastAPI
     yield
-    # Логика корректного освобождения ресурсов при остановке сервера (при необходимости)
+
+    # Фиксация события корректной остановки сервиса при завершении процесса
+    logger.info("Сервис %s успешно остановлен.", settings.app_title)
 
 
 # Инициализация основного приложения FastAPI с подключением менеджера жизненного цикла
 app = FastAPI(
-    title="History Timeline API",
+    title=settings.app_title,
+    version=settings.app_version,
     lifespan=lifespan,
 )
 
