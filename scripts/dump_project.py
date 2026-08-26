@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 
 # запуск (python scripts/dump_project.py)
