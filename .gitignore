@@ -1,5 +1,6 @@
 # Среда разработки и виртуальные окружения
 .venv/
+.kilo
 env/
 venv/
 
@@ -18,4 +19,3 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
-project_context.txt

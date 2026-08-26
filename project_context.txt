@@ -1,0 +1,2369 @@
+================================================================================
+СТРУКТУРА ПРОЕКТА: history_timeline
+================================================================================
+
+history_timeline/
+├── .github
+│   └── workflows
+│       └── ci.yml
+├── app
+│   ├── api
+│   │   ├── endpoints
+│   │   │   └── health.py
+│   │   └── router.py
+│   ├── core
+│   │   ├── config
+│   │   │   ├── config.py
+│   │   │   └── python_spec.py
+│   │   ├── database
+│   │   │   └── database.py
+│   │   └── logger.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   └── event.py
+│   ├── schemas
+│   │   └── health.py
+│   └── main.py
+├── migrations
+│   ├── versions
+│   │   ├── 310f69b33568_change_media_payload_to_jsonb.py
+│   │   ├── b0db13eb3fb1_remove_redundant_events_id_index.py
+│   │   └── c83b9a9d896b_create_events_table.py
+│   ├── env.py
+│   ├── README
+│   └── script.py.mako
+├── project_info
+│   ├── global_rules_AI.md
+│   ├── history_project_info.txt
+│   ├── Road map.pdf
+│   └── Road_map.txt
+├── scripts
+│   └── dump_project.py
+├── tests
+│   ├── conftest.py
+│   ├── init.py
+│   └── test_health.py
+├── .env
+├── .gitignore
+├── alembic.ini
+├── pytest.ini
+└── requirements.txt
+
+
+================================================================================
+Файл: .env
+Формат: .env
+Размер: 9 строк
+================================================================================
+```text
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_USER=postgres
+DB_PASS=L25v09U96
+DB_NAME=timeline_db
+
+APP_TITLE="History Timeline API"
+APP_VERSION="1.0.0"
+DEBUG=False
+```
+
+================================================================================
+Файл: .github/workflows/ci.yml
+Формат: .yml
+Размер: 34 строк
+================================================================================
+```yaml
+name: CI Pipeline
+
+# Настройка триггеров автоматического запуска при пуше в ветки и открытии Pull Request
+on: [push, pull_request]
+
+jobs:
+  tests:
+    name: Run Linting and Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # Шаг 1: Клонирование репозитория в рабочую директорию виртуальной машины
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Шаг 2: Установка целевой версии интерпретатора Python 3.14
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      # Шаг 3: Обновление пакетного менеджера pip и установка зависимостей проекта
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Шаг 4: Запуск статического анализатора кода для проверки стандартов форматирования и чистоты
+      - name: Run linter
+        run: ruff check .
+
+      # Шаг 5: Исполнение набора асинхронных интеграционных и модульных тестов
+      - name: Run tests
+        run: pytest
+```
+
+================================================================================
+Файл: .gitignore
+Формат: .gitignore
+Размер: 21 строк
+================================================================================
+```gitignore
+# Среда разработки и виртуальные окружения
+.venv/
+.kilo
+env/
+venv/
+
+
+# Байт-код и кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Базы данных и миграции
+*.sqlite3
+
+
+# Системные файлы, дампы и IDE
+.idea/
+.vscode/
+.DS_Store
+```
+
+================================================================================
+Файл: alembic.ini
+Формат: .ini
+Размер: 151 строк
+================================================================================
+```ini
+# A generic, single database configuration.
+
+[alembic]
+# path to migration scripts.
+# this is typically a path given in POSIX (e.g. forward slashes)
+# format, relative to the token %(here)s which refers to the location of this
+# ini file
+script_location = %(here)s/migrations
+
+# template used to generate migration file names; The default value is %%(rev)s_%%(slug)s
+# Uncomment the line below if you want the files to be prepended with date and time
+# see https://alembic.sqlalchemy.org/en/latest/tutorial.html#editing-the-ini-file
+# for all available tokens
+# file_template = %%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s
+# Or organize into date-based subdirectories (requires recursive_version_locations = true)
+# file_template = %%(year)d/%%(month).2d/%%(day).2d_%%(hour).2d%%(minute).2d_%%(second).2d_%%(rev)s_%%(slug)s
+
+# sys.path path, will be prepended to sys.path if present.
+# defaults to the current working directory.  for multiple paths, the path separator
+# is defined by "path_separator" below.
+prepend_sys_path = .
+
+# timezone to use when rendering the date within the migration file
+# as well as the filename.
+# If specified, requires the tzdata library which can be installed by adding
+# `alembic[tz]` to the pip requirements.
+# string value is passed to ZoneInfo()
+# leave blank for localtime
+# timezone =
+
+# max length of characters to apply to the "slug" field
+# truncate_slug_length = 40
+
+# set to 'true' to run the environment during
+# the 'revision' command, regardless of autogenerate
+# revision_environment = false
+
+# set to 'true' to allow .pyc and .pyo files without
+# a source .py file to be detected as revisions in the
+# versions/ directory
+# sourceless = false
+
+# version location specification; This defaults
+# to <script_location>/versions.  When using multiple version
+# directories, initial revisions must be specified with --version-path.
+# The path separator used here should be the separator specified by "path_separator"
+# below.
+# version_locations = %(here)s/bar:%(here)s/bat:%(here)s/alembic/versions
+
+# path_separator; This indicates what character is used to split lists of file
+# paths, including version_locations and prepend_sys_path within configparser
+# files such as alembic.ini.
+# The default rendered in new alembic.ini files is "os", which uses os.pathsep
+# to provide os-dependent path splitting.
+#
+# Note that in order to support legacy alembic.ini files, this default does NOT
+# take place if path_separator is not present in alembic.ini.  If this
+# option is omitted entirely, fallback logic is as follows:
+#
+# 1. Parsing of the version_locations option falls back to using the legacy
+#    "version_path_separator" key, which if absent then falls back to the legacy
+#    behavior of splitting on spaces and/or commas.
+# 2. Parsing of the prepend_sys_path option falls back to the legacy
+#    behavior of splitting on spaces, commas, or colons.
+#
+# Valid values for path_separator are:
+#
+# path_separator = :
+# path_separator = ;
+# path_separator = space
+# path_separator = newline
+#
+# Use os.pathsep. Default configuration used for new projects.
+path_separator = os
+
+
+# set to 'true' to search source files recursively
+# in each "version_locations" directory
+# new in Alembic version 1.10
+# recursive_version_locations = false
+
+# the output encoding used when revision files
+# are written from script.py.mako
+# output_encoding = utf-8
+
+# database URL.  This is consumed by the user-maintained env.py script only.
+# other means of configuring database URLs may be customized within the env.py
+# file.
+
+# Закомментили url потому что управление переходит в migrations env.
+# sqlalchemy.url = driver://user:pass@localhost/dbname
+
+
+[post_write_hooks]
+# post_write_hooks defines scripts or Python functions that are run
+# on newly generated revision scripts.  See the documentation for further
+# detail and examples
+
+# format using "black" - use the console_scripts runner, against the "black" entrypoint
+# hooks = black
+# black.type = console_scripts
+# black.entrypoint = black
+# black.options = -l 79 REVISION_SCRIPT_FILENAME
+
+# lint with attempts to fix using "ruff" - use the module runner, against the "ruff" module
+# hooks = ruff
+# ruff.type = module
+# ruff.module = ruff
+# ruff.options = check --fix REVISION_SCRIPT_FILENAME
+
+# Alternatively, use the exec runner to execute a binary found on your PATH
+# hooks = ruff
+# ruff.type = exec
+# ruff.executable = ruff
+# ruff.options = check --fix REVISION_SCRIPT_FILENAME
+
+# Logging configuration.  This is also consumed by the user-maintained
+# env.py script only.
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARNING
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARNING
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+```
+
+================================================================================
+Файл: app/api/endpoints/health.py
+Формат: .py
+Размер: 46 строк
+================================================================================
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database.database import get_db
+from app.core.logger import logger
+from app.schemas.health import HealthResponse
+
+# Инициализация роутера с системным тегом для группировки в документации OpenAPI
+router = APIRouter(prefix="", tags=["System"])
+
+
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Проверка статуса сервиса и подключения к БД",
+)
+async def health_check(
+    session: AsyncSession = Depends(get_db),
+) -> HealthResponse:
+    """
+    Диагностический эндпоинт для проверки статуса приложения и валидации соединения с PostgreSQL.
+    """
+    try:
+        # Выполнение легковесного тестового запроса к PostgreSQL для проверки пула соединений
+        await session.execute(text("SELECT 1"))
+
+        # Возврат типизированного объекта HealthResponse в строгом соответствии со схемой
+        return HealthResponse(
+            status="ok",
+            db_connected=True,
+            version="1.0.0",
+        )
+    except Exception as error:
+        # Фиксация полного трейса ошибки соединения в подсистеме централизованного логирования
+        logger.error(
+            "Сбой соединения с PostgreSQL: %s",
+            error,
+            exc_info=True,
+        )
+
+        # Выброс HTTP-исключения со статусом 500 для информирования вызывающей стороны
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка подключения к базе данных: {str(error)}",
+        )
+```
+
+================================================================================
+Файл: app/api/router.py
+Формат: .py
+Размер: 13 строк
+================================================================================
+```python
+from fastapi import APIRouter
+
+from app.api.endpoints.health import router as health_router
+
+# Создание главного агрегирующего роутера для всех эндпоинтов приложения
+api_router = APIRouter()
+
+# Регистрация системного роутера мониторинга состояния сервиса
+api_router.include_router(
+    health_router,
+    prefix="",
+    tags=["System"],
+)
+```
+
+================================================================================
+Файл: app/core/config/config.py
+Формат: .py
+Размер: 67 строк
+================================================================================
+```python
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """
+    Конфигурация приложения и параметры окружения.
+    Считывает значения из переменных среды или .env файла с валидацией через Pydantic.
+    """
+
+    # Системные метаданные сервиса с значениями по умолчанию
+    app_title: str = Field(
+        default="History Timeline API",
+        description="Название сервиса",
+    )
+    app_version: str = Field(
+        default="1.0.0",
+        description="Текущая версия API",
+    )
+    debug: bool = Field(
+        default=False,
+        description="Режим отладки и расширенного логирования",
+    )
+
+    # Обязательные параметры подключения к PostgreSQL
+    db_host: str = Field(
+        ...,
+        description="Хост базы данных PostgreSQL",
+    )
+    db_port: int = Field(
+        ...,
+        description="Порт базы данных PostgreSQL",
+    )
+    db_user: str = Field(
+        ...,
+        description="Имя пользователя PostgreSQL",
+    )
+    db_pass: str = Field(
+        ...,
+        description="Пароль пользователя PostgreSQL",
+    )
+    db_name: str = Field(
+        ...,
+        description="Имя базы данных PostgreSQL",
+    )
+
+    @property
+    def database_url(self) -> str:
+        """
+        Формирование асинхронной строки подключения к СУБД для драйвера asyncpg.
+        """
+        return (
+            f"postgresql+asyncpg://{self.db_user}:{self.db_pass}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
+
+    # Конфигурация парсинга переменных окружения
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+# Инициализация глобального синглтона настроек
+settings = Settings()
+```
+
+================================================================================
+Файл: app/core/config/python_spec.py
+Формат: .py
+Размер: 28 строк
+================================================================================
+```python
+import sys
+from typing import Final
+
+# Системное константное объявление поддерживаемой ветки среды исполнения
+TARGET_PYTHON_BRANCH: Final[str] = "3.14"
+
+
+def verify_python_environment() -> None:
+    """
+    Проверка соответствия версии интерпретатора установленным системным требованиям.
+    Вызывается при старте FastAPI-приложения в рамках менеджера жизненного цикла lifespan.
+    """
+    # Считывание параметров мажорной и минорной версии CPython
+    current_major: int = sys.version_info.major
+    current_minor: int = sys.version_info.minor
+
+    # Валидация запуска на целевой ветке Python 3.14 или выше
+    if (current_major, current_minor) < (3, 14):
+        raise RuntimeError(
+            f"Несовместимая версия Python: {sys.version}. "
+            f"Для работы сервиса требуется Python {TARGET_PYTHON_BRANCH} или выше."
+        )
+
+
+if __name__ == "__main__":
+    # Локальный запуск проверки окружения из командной строки
+    verify_python_environment()
+    print(f"Среда успешно валидирована для ветки Python {TARGET_PYTHON_BRANCH}+.")
+```
+
+================================================================================
+Файл: app/core/database/database.py
+Формат: .py
+Размер: 41 строк
+================================================================================
+```python
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from app.core.config.config import settings
+
+# Создание асинхронного движка для подключения к PostgreSQL через драйвер asyncpg
+engine = create_async_engine(
+    url=settings.database_url,
+    echo=False,
+)
+
+# Фабрика асинхронных сессий с отключенным сбросом состояния объектов после фиксации транзакции
+async_session_maker = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Асинхронный генератор зависимостей FastAPI для внедрения сессии базы данных.
+    Предоставляет изолированную сессию, выполняет откат при исключении и гарантированно закрывает соединение.
+    """
+    session: AsyncSession = async_session_maker()
+    try:
+        # Передача сессии вызывающему эндпоинту или сервисному слою
+        yield session
+    except Exception:
+        # Автоматический откат незавершенной транзакции при возникновении сбоя
+        await session.rollback()
+        # Повторный выброс исключения для дальнейшей обработки на уровне FastAPI
+        raise
+    finally:
+        # Гарантированное закрытие сессии и возврат соединения в пул asyncpg
+        await session.close()
+```
+
+================================================================================
+Файл: app/core/logger.py
+Формат: .py
+Размер: 36 строк
+================================================================================
+```python
+import logging
+import sys
+
+from app.core.config.config import settings
+
+# Создание именованного логгера для логирования событий бизнес-логики сервиса
+logger: logging.Logger = logging.getLogger("timeline_app")
+
+
+def setup_logging() -> None:
+    """
+    Централизованная инициализация конфигурации логирования приложения.
+    Настраивает корневой логгер, поток вывода sys.stdout, форматирование и фильтрацию шумных библиотек.
+    """
+    # Выбор базового уровня логирования в зависимости от режима отладки
+    log_level = logging.DEBUG if settings.debug else logging.INFO
+
+    # Шаблон форматирования: дата/время | уровень | модуль:строка - сообщение
+    log_format = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d - %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+
+    # Применение базовой конфигурации с принудительным переопределением обработчиков (force=True)
+    logging.basicConfig(
+        level=log_level,
+        format=log_format,
+        datefmt=date_format,
+        stream=sys.stdout,
+        force=True,
+    )
+
+    # Подавление избыточных информационных сообщений доступа сервера Uvicorn
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+    # Отключение подробного SQL-трейсинга SQLAlchemy Engine в боевом режиме
+    if not settings.debug:
+        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+```
+
+================================================================================
+Файл: app/main.py
+Формат: .py
+Размер: 55 строк
+================================================================================
+```python
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.router import api_router
+from app.core.config.config import settings
+from app.core.config.python_spec import verify_python_environment
+from app.core.logger import logger, setup_logging
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Первичная инициализация подсистемы централизованного логирования
+    setup_logging()
+
+    # Валидация версии Python 3.14.7 перед выполнением основного рантайма
+    verify_python_environment()
+
+    # Фиксация события старта сервиса с параметрами конфигурации
+    logger.info(
+        "Запуск сервиса %s v%s на Python 3.14...",
+        settings.app_title,
+        settings.app_version,
+    )
+
+    # Передача управления работающему экземпляру приложения FastAPI
+    yield
+
+    # Фиксация события корректной остановки сервиса при завершении процесса
+    logger.info("Сервис %s успешно остановлен.", settings.app_title)
+
+
+# Инициализация основного приложения FastAPI с подключением менеджера жизненного цикла
+app = FastAPI(
+    title=settings.app_title,
+    version=settings.app_version,
+    lifespan=lifespan,
+)
+
+# Конфигурация CORS для разрешения кросс-доменных запросов на этапе локальной разработки
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Подключение центрального маршрутизатора API с версионированием v1
+app.include_router(
+    api_router,
+    prefix="/api/v1",
+)
+```
+
+================================================================================
+Файл: app/models/__init__.py
+Формат: .py
+Размер: 8 строк
+================================================================================
+```python
+from app.models.base import Base
+from app.models.event import Event
+
+# Определение публичного интерфейса пакета models для явного экспорта сущностей
+__all__ = [
+    "Base",
+    "Event",
+]
+```
+
+================================================================================
+Файл: app/models/base.py
+Формат: .py
+Размер: 16 строк
+================================================================================
+```python
+import re
+from sqlalchemy.orm import DeclarativeBase, declared_attr
+
+
+class Base(DeclarativeBase):
+    """
+    Базовый декларативный класс для всех ORM-моделей проекта.
+    Автоматически формирует имя таблицы на основе имени Python-класса.
+    """
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        # Преобразование имени класса из CamelCase в snake_case с помощью регулярного выражения
+        snake_case_name = re.sub(r"(?<!^)(?=[A-Z])", "_", cls.__name__).lower()
+        # Добавление суффикса 's' для формирования названия таблицы во множественном числе
+        return f"{snake_case_name}s"
+```
+
+================================================================================
+Файл: app/models/event.py
+Формат: .py
+Размер: 64 строк
+================================================================================
+```python
+from sqlalchemy import BIGINT, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
+
+
+class Event(Base):
+    """
+    ORM-модель сущности исторического события.
+    Хранит атрибуты временной шкалы, текстовые описания, категории и медиа-данные в формате JSONB.
+    """
+
+    # Уникальный первичный ключ события с индексом
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    # Заголовок исторического события
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    # Развернутое описание исторического контекста (опционально)
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Временная метка начала события (поддерживает отрицательные числа для эпохи до н.э.)
+    start_date: Mapped[int] = mapped_column(
+        BIGINT,
+        nullable=False,
+        index=True,
+    )
+
+    # Временная метка окончания события (для событий с длительной протяженностью)
+    end_date: Mapped[int | None] = mapped_column(
+        BIGINT,
+        nullable=True,
+        index=True,
+    )
+
+    # Категория события (например: политика, наука, культура)
+    category: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    # Неструктурированные медиа-данные в оптимизированном бинарном формате PostgreSQL JSONB
+    media_payload: Mapped[dict | list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    # Статус модерации события в системе (по умолчанию 'pending')
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default="pending",
+    )
+```
+
+================================================================================
+Файл: app/schemas/health.py
+Формат: .py
+Размер: 22 строк
+================================================================================
+```python
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class HealthResponse(BaseModel):
+    """
+    Pydantic-схема для валидации и сериализации ответа эндпоинта мониторинга состояния сервиса.
+    """
+    status: str = Field(
+        default="ok",
+        description="Общий статус работоспособности сервиса",
+    )
+    db_connected: bool = Field(
+        default=True,
+        description="Флаг доступности подключения к базе данных PostgreSQL",
+    )
+    version: str = Field(
+        default="1.0.0",
+        description="Текущая версия сервиса History Timeline API",
+    )
+
+    # Разрешение маппинга данных из объектов с атрибутами (Pydantic v2)
+    model_config = ConfigDict(from_attributes=True)
+```
+
+================================================================================
+Файл: migrations/env.py
+Формат: .py
+Размер: 85 строк
+================================================================================
+```python
+import asyncio
+import os
+import sys
+from logging.config import fileConfig
+
+# Добавление корневой директории проекта в sys.path для корректных импортов пакета app
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from sqlalchemy import pool
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from alembic import context
+
+# Импорт конфигурации приложения и сущностей ORM для регистрации схемы в метаданных
+from app.core.config.config import Settings
+from app.models import Base
+
+# Получение объекта конфигурации Alembic из файла .ini
+config = context.config
+
+# Настройка системного логирования на основе параметров из alembic.ini
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# Связывание метаданных базового класса (выполняется строго после импорта всех моделей)
+target_metadata = Base.metadata
+
+# Инициализация объекта настроек для получения динамического DSN подключения
+settings = Settings()
+
+
+def run_migrations_offline() -> None:
+    """Запуск миграций в 'offline' режиме (генерация SQL-скрипта без прямого подключения)."""
+
+    # Динамическая передача URL базы данных из Pydantic Settings
+    config.set_main_option("sqlalchemy.url", str(settings.database_url))
+    url = config.get_main_option("sqlalchemy.url")
+
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection: Connection) -> None:
+    """Выполнение миграций в контексте активного соединения."""
+    context.configure(connection=connection, target_metadata=target_metadata)
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations() -> None:
+    """Асинхронная инициализация движка и применение миграций к PostgreSQL."""
+
+    # Динамическая передача URL подключения перед сборкой асинхронного движка
+    config.set_main_option("sqlalchemy.url", str(settings.database_url))
+
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    """Запуск миграций в 'online' режиме с асинхронным циклом событий."""
+    asyncio.run(run_async_migrations())
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+```
+
+================================================================================
+Файл: migrations/README
+Формат: README
+Размер: 1 строк
+================================================================================
+```text
+Generic single-database configuration with an async dbapi.
+```
+
+================================================================================
+Файл: migrations/script.py.mako
+Формат: .mako
+Размер: 28 строк
+================================================================================
+```mako
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, Sequence[str], None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    ${downgrades if downgrades else "pass"}
+```
+
+================================================================================
+Файл: migrations/versions/310f69b33568_change_media_payload_to_jsonb.py
+Формат: .py
+Размер: 38 строк
+================================================================================
+```python
+"""change_media_payload_to_jsonb
+
+Revision ID: 310f69b33568
+Revises: b0db13eb3fb1
+Create Date: 2026-08-24 14:13:05.956417
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers, used by Alembic.
+revision: str = '310f69b33568'
+down_revision: Union[str, Sequence[str], None] = 'b0db13eb3fb1'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.alter_column('events', 'media_payload',
+               existing_type=postgresql.JSON(astext_type=sa.Text()),
+               type_=postgresql.JSONB(astext_type=sa.Text()),
+               existing_nullable=True)
+    # ### end Alembic commands ###
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.alter_column('events', 'media_payload',
+               existing_type=postgresql.JSONB(astext_type=sa.Text()),
+               type_=postgresql.JSON(astext_type=sa.Text()),
+               existing_nullable=True)
+    # ### end Alembic commands ###
+```
+
+================================================================================
+Файл: migrations/versions/b0db13eb3fb1_remove_redundant_events_id_index.py
+Формат: .py
+Размер: 31 строк
+================================================================================
+```python
+"""remove_redundant_events_id_index
+
+Revision ID: b0db13eb3fb1
+Revises: c83b9a9d896b
+Create Date: 2026-08-24 12:54:55.264582
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'b0db13eb3fb1'
+down_revision: Union[str, Sequence[str], None] = 'c83b9a9d896b'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_events_id'), table_name='events')
+    # ### end Alembic commands ###
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.create_index(op.f('ix_events_id'), 'events', ['id'], unique=False)
+    # ### end Alembic commands ###
+```
+
+================================================================================
+Файл: migrations/versions/c83b9a9d896b_create_events_table.py
+Формат: .py
+Размер: 50 строк
+================================================================================
+```python
+"""create_events_table
+
+Revision ID: c83b9a9d896b
+Revises: 
+Create Date: 2026-08-19 23:10:44.114157
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'c83b9a9d896b'
+down_revision: Union[str, Sequence[str], None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.create_table('events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('title', sa.String(length=255), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('start_date', sa.BIGINT(), nullable=False),
+    sa.Column('end_date', sa.BIGINT(), nullable=True),
+    sa.Column('category', sa.String(length=50), nullable=False),
+    sa.Column('media_payload', sa.JSON(), nullable=True),
+    sa.Column('status', sa.String(length=50), server_default='pending', nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_events_category'), 'events', ['category'], unique=False)
+    op.create_index(op.f('ix_events_end_date'), 'events', ['end_date'], unique=False)
+    op.create_index(op.f('ix_events_id'), 'events', ['id'], unique=False)
+    op.create_index(op.f('ix_events_start_date'), 'events', ['start_date'], unique=False)
+    # ### end Alembic commands ###
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_events_start_date'), table_name='events')
+    op.drop_index(op.f('ix_events_id'), table_name='events')
+    op.drop_index(op.f('ix_events_end_date'), table_name='events')
+    op.drop_index(op.f('ix_events_category'), table_name='events')
+    op.drop_table('events')
+    # ### end Alembic commands ###
+```
+
+================================================================================
+Файл: project_info/global_rules_AI.md
+Формат: .md
+Размер: 134 строк
+================================================================================
+```markdown
+\[АЛГОРИТМ МЫШЛЕНИЯ И АНАЛИЗА]
+
+1\. Перед формированием ответа используй режим замедленного глубокого мышления. Выстраивай строгие логические цепочки.
+
+2\. Проявляй проактивность. Если в моей ситуации или вопросах упущены важные аспекты, скрытые риски или редкие случаи, обязательно самостоятельно бери их во внимание и добавляй в ответ.
+
+3\. Опирайся исключительно на принципы доказательной науки, актуальные международные и современные отечественные научные Гайдлайны. Полностью исключай методы с недоказанной эффективностью. Используй современный взгляд на проблему.
+
+4\. Давай только проверенные факты. Если ты в чем-то неуверен или данных нет, прямо скажи об этом.
+
+5\. Приоритизируй глубину и практическую пользу ответа, а не его длину.
+
+
+
+\[ЖЕСТКИЕ ОГРАНИЧЕНИЯ (АНТИ-ВОДА)]
+
+1\. СТРОГО ЗАПРЕЩЕНЫ любые вводные фразы, канцеляризмы, приветствия, комплименты запросу и вежливые отступления (например: «Ты поднял очень важную тему», «Отличный вопрос», «Как врач я понимаю»).
+
+2\. Всегда начинай ответ с главного тезиса или прямого решения (режим "Direct Answer First"). Начинай ответ СРАЗУ И НЕПОСРЕДСТВЕННО с сути дела — с первого пункта доклада или прямого ответа на первый вопрос.
+
+3\. Полностью исключи банальности, пустые рассуждения и воду. Каждое предложение должно нести новую информацию или аргумент.
+
+4\. Дроби текст на короткие абзацы (до 3–4 предложений).
+
+5\. Не используй смайлики и эмодзи.
+
+6\. Не используй слишком часто маркированные списки.
+
+7\. Не выделяй ничего жирным шрифтом.
+
+
+
+\[ТРЕБОВАНИЯ К ОФОРМЛЕНИЮ И СТИЛЮ]
+
+1\. Формат ответа: всегда развернутый, подробный доклад.
+
+2\. Глубина: аргументируй каждый свой тезис, подробно объясняя логику процесса. Разворачивай тему широко.
+
+3\. Язык: сочетай академическую точность экспертного уровня с доступностью изложения.
+
+4\. Всегда отвечай на русском языке, даже если запрос на английском.
+
+
+
+\[ФОРМАТ ОТВЕТА]
+
+Выводи конспект строго в текстовом формате, используя следующую систему оформления:
+
+— Главные заголовки оформляй арабскими цифрами (1, 2, 3 и т.д.).
+
+— Подзаголовки внутри тем оформляй строчными буквами с круглой скобкой (а), б), в) и т.д.).
+
+— Элементы маркированных списков внутри подразделов выделяй исключительно дефисом (—). Не используй точки (•), звездочки (\*) или галочки.
+
+Пример схемы оформления, которой ты должен следовать:
+
+1\. Название первого главного заголовка
+
+а) Название первого подзаголовка
+
+— Первый тезис конспекта
+
+— Второй тезис конспекта
+
+б) Название второго подзаголовка
+
+— Третий тезис конспекта
+
+2\. Название второго главного заголовка
+
+
+
+
+
+
+
+\[РОЛЬ И СТИЛЬ]
+
+Ты — Team Lead, технический архитектор и Senior-разработчик на языке Python с глубоким пониманием принципов Clean Code и понятной архитектуры. Твой стиль — строго структурированный, технический, без вводных слов и общих рассуждений.
+
+
+
+
+
+\[ТЕХНИЧЕСКИЙ СТЕК И МЕТОДОЛОГИЯ]
+
+— Стек проекта: Python 3.14.7, FastAPI (асинхронный), PostgreSQL 18, Графический клиент встроенная панель Database в PyCharm, SQLAlchemy (асинхронная), Pydantic v2, Python 2026.2.1, Windows 11.
+
+— Метод разработки: Вайбкодинг. Задачи по коду должны быть разделены так, чтобы пользователь мог поочередно Выполнять их, копировать их, отдавать ИИ-кодеру и сразу получать готовые рабочие файлы без необходимости ручной склейки кода.
+
+
+
+\[АЛГОРИТМ ПОСЛЕДОВАТЕЛЬНЫХ ВЫЧИСЛЕНИЙ]
+
+Шаг 1. Сопоставь фактически реализованный код и файловую иерархию с целями текущего шага дорожной карты. Определи полноту выполнения шага.
+
+Шаг 2. Проведи архитектурный аудит: проверь разделение зон ответственности, отсутствие циклических импортов, корректность структуры каталогов и чистоту связей между слоями (роуты, сервисы, модели, схемы).
+
+Шаг 3. Проанализируй код на уровне реализации: выяви блокирующие синхронные вызовы в асинхронном контексте, ошибки в сессиях баз данных, некорректную валидацию типов, потенциальные утечки памяти и неоптимальные запросы.
+
+Шаг 4. Сформируй итоговый бинарный вердикт: либо подтверди успешное завершение шага и готовность к переходу на следующий этап, либо заблокируй переход с указанием критических замечаний.
+
+Шаг 5. Сформируй детализированный список необходимых правок, отсортированных по уровню критичности (Critical, Warning, Optimization), с точным указанием файлов и логических узлов.
+
+
+
+\[ЖЕСТКИЕ ОГРАНИЧЕНИЯ]
+
+Категорически запрещено писать программный код, готовые файлы или шаблоны кода; твоя функция ограничена только экспертным аудитом и формулированием замечаний.
+
+Запрещено выносить положительный вердикт при наличии архитектурных нарушений или блокирующих синхронных операций в асинхронном коде.
+
+Запрещено выдавать размытые формулировки без точной привязки к конкретным файлам, классам, функциям или схемам проекта.
+
+Запрещено смешивать задачи аудита с планированием или декомпозицией будущих шагов для других инструментов.
+
+
+
+\[ФОРМАТ ИТОГОВОГО ВЫВОДА] 
+
+Выведи аналитический отчет строго по следующим разделам с цифровой нумерацией:
+
+1\. Итоговый вердикт. Четкое заключение: Успешно завершен (готов к следующему шагу) или Требуются исправления (переход заблокирован). 
+
+2\. Соответствие целям шага. Оценка полноты реализации функционала, заложенного в текущем этапе дорожной карты. 
+
+3\. Архитектурный и технический анализ. Разбор чистоты архитектуры, корректности изоляции слоев и использования заявленного стека. 
+
+4\. Выявленные дефекты и риски. Список найденных проблем с разделением на критические ошибки, потенциальные баги и технический долг (с указанием проблемных мест в кодовой базе). 
+
+5\. Перечень обязательных корректировок. Четкий список требований, которые необходимо исправить перед переходом к следующему этапу. 
+
+
+
+```
+
+================================================================================
+Файл: project_info/history_project_info.txt
+Формат: .txt
+Размер: 124 строк
+================================================================================
+```text
+Общее видение проекта
+Аналоги: 
+Timegraphics. Схожая с нашей задумкой реализация, платная. 
+
+ Interacty. Реализация интересная, формат лонгрида удобный. Платно.
+
+Anytype.io - полностью бесплатный сервис доски, работает онлайн и офлайн. При создании доски создается цифровой ключ, необходимый для доступа к ней Local-first и р2р-сеть. Создавать заметки можно на устройстве без интернета, обмен заметками происходит без центрального сервера через р2р. Есть облако связей, как в обсидиан.
+
+Домашняя страница выглядит как горизонтальная ось X по центру.
+Ось X - Это таймлайн.
+В качестве основы для серверной части выбран фреймворк FastAPI в связке с ORM SQLAlchemy и базой данных PostgreSQL.
+Слева направо на оси X раположена временная шкала разбитая на отрезки. В первоначальном состоянии Один отрезок равен 100 лет (один век). 
+Кликом по отрезку (столетию) - приближаем указанный временной отрезок. Ось X растягивется, и столетие разбивается на десятиелетие. При клике по десятилетию - отрезок растягивается на года. При клике на отрезок Года - погружаемся в отрезок разбитый на 12 месяцев. И далее до дней, часов, минут, секунд. Минимальный отрезок - минута разбитая на секунды.
+Рассмотреть возможность делать приближение колесиком мышки, точка приблежния - курсор.
+По мере приближения количество событий на экране увеличивается. Например в диапазоне 1900-2000 отмечена Вторая мировая война, чуть левее центра. При наведении курсора на эту точку и растяжении шкалы, допустим до 1930-1950 появляются новые даты, например, начало и конец Великой Отечественной войны. При растяжении 1941-1945 появляется хронология ВОВ, блокада Ленинграда, Сталинградская битва и т.д. 
+Ключевой особенностью сайта является возможность добавлять информацию об исторических событиях, которые произошли в указанный отрезок времени на оси X.
+Например: На временной оси видим отрезок 1900-2000 гг. нажимаем на кнопку и добавляем описание этого периода (первая мировая, красная революция, становление ссср, вторая мировая война, распад ссср, формирование государства Российская Федерация.). Нажимаем на этот отрезок, проваливаемся в столетие разбитое по десятиетиям. Пользователь выбирает 1900-1910гг. и  добавляет туда информацию (например, первая мировая война). И так на любом этапе иерархии. На любой отрезок можно добавить событие и указать его продолжительность на оси.
+К каждому временному отрезку можно добавить блок информации по нескольким направлениям. Например, добавить информцию о культурном событии, экономическом, геополитическом, научном. Принимаются несколько типов данных. Можно добавить текст ( с оформленнием markdown), видео (интеграция с YouTube или Вконтакте)? Аудиолекции/подкасты/музыка, изображение.
+Возможность кастомизации (цвета, шрифты, иконки и тд).
+Возможность Разделить направления по цветам. Культура - зеленая, политика - синяя, экономика красная и т.д. Может быть сделать эту функцию изменяемой самим пользователем (или админом) 
+Сделать возможность скрывать и показывать разные направления (фильтр по темам). Например, при полной октрытости видно все слои - культура, политика, экономика. Можно оставить одну культуру, или две - экономику и политику. 
+Сделать возможность менять слои местами и изменять прозрачность нижележащих слоев. Например стартовый порядок экономика, политика, культура. Можем убрать политику и включить прозрачность, тогда экономика станет чуть прозрачнее по сравнению с нормой, культура как верхний слой - самый непрозрачный. Если включить политику и вынести ее наверх, то она станет самой непрозрачной, культура станет второй чуть прозрачнее, экономика как нижний слой самый прозрачный.
+Информацию на временную шкалу может добавлять любой зарегистрированный пользователь. Но прежде чем вывести эту информацию на публичную страницу - ее должен одобрить администратор. 
+У Администратора должна быть панель с "заявками" на добавление информации. Он может одобрить, отредактировать или отклонить заявку на добавление информации. Администратор может добавлять на временную шкалу свою заметку без одобрения.
+Должна быть возможность добавить год в конце шкалы (например, изначально шкала создана до 2026 года, но спустя год я хочу добавить на нее 2027 год и заполнить его событиями). Так же должны быть возможность добавлять года в начало шкалы (например, я захочу добавить события, которые произошли до нашей эры). Но по умолчанию для нового пользователя шкала будет начинаться с 1900 по настоящее время.
+Сделать шкалу постоянно обновляющейся, как часы. Начало шкалы пользователь указывает для себя при регистрации. Последняя точка это часовой пояс сервера.
+По умолчанию старт 1 января 1900 или можно выбрать другой, например дата рождения пользователя.
+Возможность добавлять события в будущем. Это удобно для планирования событий. Например, планируюстя выборы в госдуму. Можно отметить на таймлайне планируемое событие и дополнять его некоторыми подробностями по ходу времени.
+Как я это вижу: при создании карты задается начальная точка 1900г. После создания загружается экран с таймлайном, при этом отрезок от старта до текущего времени выделен например черным цветом, а отрезок (или луч) с текущего времени до, например 01.01.2100 светло серым, период до стариа можно обозначить таким же цветом. Ввод данных на таймлайн доступен в любой точке настоящего, прошлого или будущего. По ходу времени серый цвет будущего будет становиться черным настоящим.
+По умолчанию создается таймлайн истории России 01.01.1900 по настоящее время.
+Таким образом мы получаем временную шкалу, наполненную хронологически выстроенными событиями (От общих описаний, до детально расписанных поминутно).
+Должна быть возможность выгрузить информацию в формате pdf по выбраннам годам. Выгруженный файл должен иметь вид Лонгрида, на подобие Interacty.
+Иметь возможность: при создании нового своего таймлайна создается цифровой ключ, необходимый для доступа к ней Local-first и р2р-сеть. Создавать таймлайн можно на устройстве без интернета, обмен таймлайнами происходит без центрального сервера через р2р. Есть облако связей, как в обсидиан. Проект должен быть открытым.
+Визуал:
+События ранжируются по значимости - век, десятилетие, год, месяц, день, час, минута, секунда. 
+Появляются на экране в зависимости от масштаба так же - век, десятилетие, год и т.д. 
+Для того, чтобы обьединить множество подробностей одного события задается тэг по верхнему рангу события, например событие "Полет Гагарина" - вековое, поминутное представление полета с подзаголовками выглядит как (век)полет гагарина/(час)подъем, или (век)полет гагарина/(минута)"поехали!"
+В любом приближении можно открыть дополнительное окно с представлением таймлайна в виде статьи (markdown?), где будут отражены события соответствующего ранга
+
+-------------------
+Структура
+1. Концепция и бизнес-цели веб-проекта
+а) Назначение и ценность продукта
+— Проект представляет собой интерактивную краудсорсинговую платформу для визуализации исторических процессов с глубокой хронологической детализацией.
+— Главная ценность заключается в возможности непрерывного масштабирования временной шкалы от тысячелетий до секунд с точной привязкой текстового и мультимедийного контента. Возможность фиксации как масштабных исторических эпох, так и точечных краткосрочных событий в рамках единого интерфейса. 
+— Система решает проблему фрагментированного восприятия истории, позволяя сопоставлять культурные, экономические и геополитические события на единой оси в наглядном виде.
+б) Функциональные границы и ограничения
+— В ядро системы (MVP) входит механика зуммирования шкалы, многопользовательская система ролей, панель модерации и генерация лонгридов в формате PDF.
+— На текущем этапе исключаются алгоритмы автоматического фактчекинга и сложная система репутации авторов, требующие избыточных вычислительных мощностей. Но в будущем это можно добавить.
+— Ключевые системные риски включают снижение производительности браузера при рендеринге тысяч перекрывающихся событий и проблему расхождения юлианского и григорианского календарей в истории России.
+— Необходимо изначально заложить математическую модель базы данных для корректной обработки дат до нашей эры (отрицательные значения времени) и событий с неточной или длительной продолжительностью.
+в) Профиль целевой аудитории и поведенческие сценарии
+— Исследователи, историки и преподаватели, формирующие хронологические цепочки событий для лекционных и научных материалов
+— Учащиеся и студенты, использующие интерактивную ось для визуального освоения исторических периодов и подготовки к аттестациям
+— Контент-менеджеры и редакторы платформы, осуществляющие модерацию, валидацию и наполнение оси верифицированными данными
+— Пользователи мобильных устройств и десктопов, требующие бесшовного жестового управления (pinch-to-zoom) для изменения масштаба времени
+2. Пользовательские роли и сценарии взаимодействия
+а) Модель ролей и прав доступа
+— Гость платформы имеет права на просмотр шкалы, фильтрацию по категориям, навигацию по уровням детализации и экспорт PDF-документов.
+— Зарегистрированный пользователь получает доступ к форме добавления новых событий с прикреплением медиафайлов, форматированием Markdown и указанием временных рамок.
+— Администратор обладает правами модерации заявок, прямого добавления контента без очередей и настройки глобальных параметров (цветовые схемы, шрифты, расширение границ оси времени).
+б) Детализация пользовательских путей
+— Механика зуммирования (проваливания в века и секунды) требует реализации асинхронной подгрузки данных (lazy loading), чтобы запрашивать события исключительно для видимого отрезка оси, исключая перегрузку сети.
+— При добавлении события пользователь выделяет отрезок на оси, выбирает категорию, вводит данные и обязательно указывает источник, после чего сущность переходит в статус ожидания.
+— Для предотвращения тупиковых путей пользовательского опыта необходим постоянный элемент интерфейса в виде "хлебных крошек" или кнопки сброса масштаба, позволяющий мгновенно вернуться на уровень обзора столетия.
+3. Информационная архитектура и структура данных
+а) Модель данных и сущности
+— Базовая сущность события включает идентификатор, точные метки начала и конца (timestamp), заголовок, описание, массив ссылок на медиа, категорию и статус модерации.
+— Модель иерархических уровней вложенности оси Х: уровень 0 (столетия), уровень 1 (десятилетия), уровень 2 (годы), уровень 3 (месяцы), уровень 4 (дни), уровень 5 (часы/минуты/секунды).
+— Логические связи типа один-ко-многим между временным отрезком верхнего уровня и вложенными подпериодами для корректного пересчета координат при зуме.
+— Валидация требует проверки пересечения временных диапазонов, чтобы алгоритм компоновки мог автоматически разносить одновременные события по вертикали без визуальных наложений. Инструмент наложения (overlay) параллельно протекающих событий на оси Y (вертикальное стекирование блоков) во избежание визуального перекрытия элементов
+— Хранение заявок реализуется через механизм теневых копий или версионирования, позволяющий администратору видеть разницу между опубликованной статьей и предложенными пользователем правками.
+б) Экраны и компоновка интерфейса
+— Главный экран представляет собой полноэкранный холст с элементами управления масштабом по краям и плавающими фильтрами категорий для снижения визуального шума.
+— Панель модератора проектируется в виде таблицы с быстрыми фильтрами по статусам и встроенным окном предпросмотра, показывающим, как именно событие встанет на шкалу.
+— Модуль выгрузки PDF работает через модальное окно выбора начального и конечного года, после чего алгоритм трансформирует горизонтальные данные в классический вертикальный лонгрид.
+в) Функциональный состав и модульная структура
+— Модуль динамического рендеринга горизонтальной оси Х с автоматическим пересчетом шага сетки разметки при изменении масштаба
+— Система интерактивного погружения (drill-down) по клику на отрезок времени с плавной анимацией расширения текущего блока и скрытия соседних
+— Функционал создания и редактирования исторических событий с привязкой к выбранному масштабу времени и указанием их точной протяженности на оси
+4. Технический стек, интеграции и безопасность
+а) Архитектурные и технологические требования
+— Для рендеринга шкалы потребуется использование Canvas API, WebGL или специализированных библиотек визуализации (D3.js), так как стандартный DOM-дерево не справится с плавной анимацией при масштабировании.
+— База данных должна поддерживать эффективное индексирование диапазонов (например, PostgreSQL с типами range), чтобы мгновенно отдавать события, попадающие в текущий фокус экрана.
+— Процесс экспорта в PDF необходимо вынести на серверную сторону, чтобы избежать зависания клиентского устройства при формировании объемных лонгридов со встроенными изображениями.
+б) Технологические параметры и внешние связи
+— Интеграция со сторонними видеоплатформами через Embed API (YouTube, Вконтакте) для бесшовного воспроизведения медиаконтента внутри модальных окон
+— Потоковая обработка и воспроизведение аудиофайлов (подкасты, лекции) с поддержкой стандартных форматов (MP3, AAC) через встроенный HTML5 Audio API
+— Генератор экспортных файлов на стороне сервера (например, на базе библиотек Puppeteer или HTML2PDF) для динамической сборки и верстки PDF-документов в формате лонгрида
+— Механизм динамического расширения границ временной шкалы в обе стороны (включая отрицательные значения Unix-времени для эпох до нашей эры)
+в) Безопасность и соответствие регуляторным нормам
+— Двухуровневая система аутентификации и авторизации пользователей через стандартные протоколы (JWT) или интеграцию с социальными сетями (VK ID)
+— Модель разграничения прав доступа (RBAC): неавторизованный пользователь (просмотр), зарегистрированный пользователь (создание заявок), администратор (полный доступ)
+— Обязательная фильтрация Markdown-разметки на стороне сервера перед записью в СУБД для предотвращения XSS-атак через инъекции вредоносных скриптов
+— Система изоляции административной панели управления заявками, исключающая прямой доступ к эндпоинтам модерации со стороны обычных клиентов
+5. Интерфейсная логика и визуальная структура
+а) Навигационная карта и структура страниц
+— Домашняя страница с центрированной интерактивной осью X, оснащенная контроллерами масштабирования и кнопками быстрого сброса к периоду по умолчанию (1900 — настоящее время)
+— Модальный интерфейс или боковая панель (Drawer) для пошагового заполнения полей заявки на добавление события с выбором категории и загрузкой файлов
+— Панель администратора со списком входящих заявок, разделенная по статусам (новые, на доработке, отклоненные) и функцией быстрого сравнения версий контента
+— Экран настройки параметров отображения, позволяющий изменять цветовую схему категорий, шрифты интерфейса и типы иконок событий
+б) Компонентная модель страниц
+— Компонент временной сетки с поддержкой цветового кодирования направлений развития (культура, экономика, геополитика, наука) для визуальной сепарации данных
+— Интерактивный блок события на таймлайне, меняющий свой размер и детализацию (от иконки до краткого превью) в зависимости от текущего шага зума
+— Универсальный плеер-контейнер для воспроизведения прикрепленного аудио-, видео- и графического контента без перехода на внешние ресурсы
+— Форма экспорта с чекбоксами выбора временных интервалов и категорий, генерирующая лонгрид-версию хроники для печати или сохранения
+6. Стратегия поэтапной разработки (Дорожная карта MVP)
+а) Границы минимально жизнеспособного продукта
+— Реализация базового математического движка оси X с жестким масштабированием в диапазоне 1900 — 2026 гг. и вложенностью до уровня месяцев
+— Текстовый формат описания исторических событий с делением на 4 базовые категории без поддержки сложной кастомизации шрифтов
+— Упрощенный личный кабинет пользователя для отправки событий и интерфейс администратора для их базового одобрения или отклонения
+— Функция локального экспорта выбранного периода в статичный текстовый лонгрид без сложной верстки элементов
+б) План декомпозиции на технические спринты
+— Спринт 1: создание строгой математической модели пересчета экранных координат во временные метки и реализация базового компонента бесконечной оси X с зумом. Разработка математической модели бесконечного таймлайна на фронтенде и структуры реляционной базы данных для хранения интервальных событий
+— Спринт 2: Проектирование схемы базы данных, создание API для пространственно-временных запросов и разработка алгоритма предотвращения коллизий элементов на экране. 
+— Спринт 3: Создание REST API для отправки контента, развертывание ролевой модели доступа и логики модерации (CRUD операций для заявок)
+— Спринт 4: Верстка интерактивных компонентов оси (вертикальное стекирование перекрывающихся событий). 
+— Спринт 5: Интеграция Markdown-редактора, парсеров внешних медиа (YouTube, VK) и сборка системы ролевой модерации с интерфейсом одобрения заявок. 
+— Спринт 4: Разработка модуля экспорта в PDF в формате лонгрида, внедрение кастомизации интерфейса и финальное нагрузочное тестирование рендеринга оси
+в) Стратегия пошаговой сборки и тестирования
+— Очередность генерации модулей через ИИ (от ядра базы данных до интерфейсных компонентов)
+— Методология сквозного тестирования функциональности (тест-кейсы для зума и валидации форм)
+— Порядок развертывания тестовой и продуктивной версий сайта на сервере
+— Механизм сбора технических логов и ошибок интерфейса на этапе раннего тестирования
+```
+
+================================================================================
+Файл: project_info/Road map.pdf
+Формат: .pdf
+Размер: 917 строк
+================================================================================
+```text
+%PDF-1.3
+%����
+8 0 obj
+<<
+/Type /ExtGState
+/ca 1
+/CA 1
+>>
+endobj
+7 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/MediaBox [0 0 595.28 841.89]
+/Contents 5 0 R
+/Resources 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/ExtGState <<
+/Gs1 8 0 R
+>>
+/Font <<
+/F1 9 0 R
+/F2 10 0 R
+>>
+/ColorSpace <<
+>>
+>>
+endobj
+5 0 obj
+<<
+/Length 2356
+/Filter /FlateDecode
+>>
+stream
+x��\K��6��W�,�U|�>��-��-�0��b	�߿E�%ɶTr �'0�=#�͏�~Q0Xz��G�`r�����
+��~;|����������p�v���ߎ�.�?���>�}�RB�1����?apv����f���.W��&!��P��t�"]���>���~�8��p��q��%	d�����I
+a��g��ڍ�t��|XA��qĆƙ��)��FTt�TH���阢7ц�^���G�=�4���nC�����X(&����_�t}v)8�u�묲'�	)yS�E�ۆ��H���h��H��ꑖ���$�йD���]������HbΦ �[�	�t�:��}bP&9��qZ��E�ѸhrL�� �H�JH7:U����ªֵ�b�<�F�O1D'o�Bˆ�,�а~v��̥��qה�T� �	����f!�TqU��A^��U��䩛ۥɊ��t\*�bp���j@�{�I�\�vN+8�Db��KF�� �
+$���F�߉�|h?"�9"R@,��H�J�T�tTD � 	=UPy��ld�H�x����#\Y����>�K������{��:�sGAv.��7��v��+Y|Q6d
+�Ggȗ� ���C0q4ocj2���}�^H�6$ӶԜ��X�DH$cRaq�Iȗ�i]�!�hp�"�}���Y���K2�
+�W=�bh�I>+<�-�I1����I�z(J� ��*�X��u�ԅ����>��<"<x���ф�F�wՁ.R�ߑ8�u	x�������4chp�E�ܭ�p�; �"w�����& �5�g��N�&,�D�+-C
+d��"���Ub�ߤ�N	Q�I�d�&�hq2M�E��.3���fQZ���HP{��z��a��Vʽ\̓u�c�����5�p0�z^�D���}4�wk�R�365UmH)���	�W���8�U����F
+/0v��|�A��=��A�
+Ȕ���%�V=u���h�h\�咲�r�L�@R�^8�YWC��\<��^��pe�O�U�P�o����ZԴ]���Y�J#�#qk�������P&c#A���4gSiw��ᵢ�Ȭw�+��8^:>�GO�H��/��Һ�+57�䉂�����V�lޕ����I8���M=���-4:+%+!p�\į��0��E9g�����Pw��8�˹���h�¹㜙+��> ˼H7v��j�U*�������Y�V�鲇H/���%�p��T�]ٔ�4�-2Yث%)y\���	Z�;�����]�&�M�����D��D�A�>�+��(!�n)ܲ�����i����Z�c���Z����W)��T�������$���{B��Z�5N�v	2�!Q�{���e ��sx��J[��8=T��}D\*�R2��ω�`��+���q>�]�>S�W܇^��{
+��6�("�	�~�]��%�&t��.��v��N�"�x��j����9�TyR����.�<��8�	�"��@S/��D�
+������[Do��.�8���am82� y.8>�Ȯ#5�/�\l.�=k�LJ�Lj|��۰�̳)2<��ۏµ2s��,�	\����.�^�Rq���fg-�^��m�jxPiO���^/�����^�OI
+�����Ǜ*:����Q-�&�8����$x��k�-��P	/7��U�����LS%	�jR���P�R�-e�B��|���p��HDqZ�?��czE����CS�qt�z$	
+.�O�n̎T���tg�h ���J������8{�s*�o6?�Ák��j,�v�?_��30���l�Z��T��*	�<�>����M%t��qmZ$�]$ޓ �F��������n�Z��3g+=���:[��c"����A����8���L5W_�l��{z��2�?�x� ʵ��b�4ћ�W��|�OZ���*+c�T���V�?�yi#pۂ��I=Խj�d��Z6��������r؎��\��汪{7�r�G���^�s�Ż�s�� <4o{_)�f�dbmv�Y�a!���s��!�Jxk�Gwn��<�&����s�֪�Z�e�*;n��[�f����`�0(�����U���Ib�9<K-�D#�����o���\��3��A�d4�R�G4e����b�B7³yQzM)�ALč���!�:Vy�
+e�>z_dD�6
+�N��*���6���
+���q���ktLC&v� )���8KJ���=����ؘs�mh��|�g�##`d�i냽
+�=9�8�F�Ї���p&�ZF�2Z.!e����+Y�5�?��D�j��)��b���'?sM{K!X] ��{��
+���d#�
+endstream
+endobj
+13 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/MediaBox [0 0 595.28 841.89]
+/Contents 11 0 R
+/Resources 12 0 R
+>>
+endobj
+12 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/ExtGState <<
+/Gs1 8 0 R
+>>
+/Font <<
+/F2 10 0 R
+/F1 9 0 R
+>>
+/ColorSpace <<
+>>
+>>
+endobj
+11 0 obj
+<<
+/Length 2700
+/Filter /FlateDecode
+>>
+stream
+x��\Ko#���W��d�l0|Xd�@n	|r��� ��ߟ��-�]ݛ�d��أ��_��I3i����?�3*�����O��0�?~�~���o�<���ן��.�q���z��Ɍ~�������樕�g?���';Y;�]O{�Z_�6����>�������/rn*����o�x<�kF���B��O���`1
+� ��U���`��̒�?��]�3�ǓE�%5��.��?^*��|h��֙���,#ھN��3[��^������{!mc�Bx��U���\����!�d��͍O.ڗ?T�.�o[U�ʇ� ����M�g�iV!�b��¼/����T�u��;> �	-Bwm�+�zD�:��찫���̙ � Jg���,b^E�͡���tbp�yH:��~�@��$�חE�d���A:��;�Yd���7��BR[9]H�d`�}HP��	r�j���v��e��jc��B�q�8tу�7�C�Z?��Ґ�=��3����ɓ�!KV�U���7ɗ1c�Gf	R9�Ʌ7!�rJh��V���0f�Y�.b���SŸX^T��`1i)�ϢpB�	�l��N/�/�QU�]��8��,��Ư̈́}�Q�`����qHI�׶����*$�POP�FDBh�ţ�
+�:P�Ʋ��&	h�i5��As����e+#�K>���ۃ��و�1��<RH��iW�����,�%�
+�mF&��$G(
+ޢ��9�~j<ĝʹ�yo򿂕L�bI��{T(AxZ]fU9���ؕ����z�9�P �Ք���v�X8���M�_��D�bg���(��"�*��@7�r�(�X_j�l�2��90I3�j��\W��������+���B2bm1'��jGP�S2�C��,IDO�
+�G�$��^
+Ff[Zs���]?�`(c
+R!��3��b;�]��b�L�Cq 
+)bc��"�VԒ��4��8��M&��
+)��A�Q>��K���X�;��KbI��$S�Ve�����
+n��@�vT�S	Y�H��=ܽ��[ŝ
+���5p^�Z��P���|�T��&��Te�˛s���B}��jc�*�"h�� �\�-�H�Lޞ��>���E�2UP M�n�#\S�N	��>�TO?dDƠ6�gQ��t�A������:�.�r�U���z1(�bf�)��i.}2:(o��`����T\�6s!|�0D��>�97��� $޼���1��H
+��4I��BGO�]�0H2���[��>+���ID&b&�p�5��;+ؒs+�PQV[rU�.�*͞X��Y�:t�P�c�!/Q�*�h]�y:1�x���ag��+��X��`��x���-�YX8Yl�PC��T�����	��zV����iqK��J��E�W�0s^J
+�����>�+3��~�� 5�;mX��襋?�`	;�
+��
+G��h�YUAH���r�L* �{(�g�0"zFAc���]X씐�Zo�ʲ�0=w������sT�D	ےH%���T�4�ĶPg�0�ڛ�p��ZjF�C"9��	1�:��Nϼ�70]p���O�(fԬFS�3��]o�:Sd��\����A�u����9�jR�Y�VǬ�]9=4X3%��&&���,<-�a�ԍ�6�5=�h��1��c��Kg�l��a��i�Nv��h�Iw4W�Ϻ9�X�
+��dR.�h�z�d�d-Q.-�ɶ)-�l���uFjz��|�Bx�@�*�3�.��	��؝6�[m#Oj��,{��׍�EO�^�]�%Rϩ�Ƈ�6�s�!X�I�>���SƇ�')��Mq2[��*��n�� DhP>:Tb��b�ꚳ������ji,�F)L}PGB
+�4h4��I[� �z���zQ��[잔ȃ�c<��͘[Y�m辵�+C}Y���*�찼)Y'�΅���ºM.8����K�/7�a�����]f;|�8m^ޮ��[D��TwaQ���D*�'"Y.
+�Xa�ny��B��)R}����4ZC���f{�r]��j�T��#�L8�µ�\�l-�=z=엓���
+m��!g����ʶCă�C��9ڷ��r�&���@�F��ЂH���͢g_\�y�[��&u�6}_�����}����H�3o� ?S,�	�J�5 �#H�֭���Ml�!wm��<e�|r��"N�nr&��;��񹉖SVS9�����K�ك*�T�Z�ϕ��~�h��yky@M��~��%�Y �j\��>�7�ڏi���󬼔]�A��b�;��@ ��O�|eb�r�{���`�a�u�E�J�>��b���kh��5�	�|��v2j:(���|���(`HV����'�zЌ���8TB�^�	�ͫ�*�,��_~&��=�g ?��w��!,��p[_m�<-�r3�#��-�lxA���der5��3����w��r���5��[l�JIfM�,��K��8�B��-P?)w�J�7m��v��}7�w��z|����gϼ�.�ߐ�_��.����s6�8�M����/�ȵ}l��"d���\��tf>��Y�TU�����7���"�l���yX��+N���a!Pf����J�>�~���h�3G�>� �?�2"'L������C+st``�(���=��<c��.�7]6W��Wz�ʕf
+�T�{�ݵ�C�xH?�w9C�������T��
+endstream
+endobj
+16 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/MediaBox [0 0 595.28 841.89]
+/Contents 14 0 R
+/Resources 15 0 R
+>>
+endobj
+15 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/ExtGState <<
+/Gs1 8 0 R
+>>
+/Font <<
+/F1 9 0 R
+/F2 10 0 R
+>>
+/ColorSpace <<
+>>
+>>
+endobj
+14 0 obj
+<<
+/Length 2174
+/Filter /FlateDecode
+>>
+stream
+x��\�nG��W��\,�6@�!��@� y� �����zzZ=�q"Na,Y�^q�#�0Y�� �G"0)O�?v��o�w�=�������L��;[��y����k[?��K�>Ld����<��/�&��i�˓�p��"�
+��|�<a61:���M���)�+=O������w/����5�&�d���/߾��<�d�f���t:�r2��UxUz�I�
+ʷ�ۨ���hlH��u�AC����������y�XR�!�O*r�x�\��<yS$�X	���Sח�?��|��s�І�![�3�-��v��ɷ7V����S��&7�����y'{��W��h�%O�5�@R��*�u��xP�(Q0��Dټ��0[P�+~j	0���L��z�ƽv�o�&���`.��4� |ɺY�")�i��d��	��e�
+�9����!L�A�Å�	u\�[S1;Y��m�J��E�[�Pe�N�JM������*R�HWlN	"A0��ƿ� �6��U�;ő�q3K�bv�;�kN|��2aKص]�BI��,�h��(��B�ky�9�T#8�x�[E�Ԕ~��%&�?	]�*7BG&�� �j�^oM��{.��.��+?go]�ouN����lp�m@�n��ML����R0�)r"�TZ�6(�H��zP�g��5.�;Z.W���
+ث�.�B��D �W}o��V
+���QVA��5�r���8܁�s6�V+*h���Xl�-�t.�&��ZAz!%��!�����0��k}TM�:rt.�a��#ͭ���(|�ΠͦJ��Kli���v}�o-kʐ�7�ݽ�v�T13��=Z�{�ũ�E�
+����e䲁sjo:z���A \���*����ZW�Ȫ8���"]1�A����6�p}|�	��I��ўٝ�3k}:}YcG8��qv���+��+P�gw�6���@2��2{*EEd��nv�^hW5g5�ae�����
+od
+�ЍH*�)��XD� �=�N\wk�
+��+��^����
+���y��CJ
+Rܦ�|3э�oQ���S�
+�t&Bգ��˝�+�&!�J�seP�Þ�y��vĵ}vT���f;���gù�D���r�%"��;^��J�*
+���o,�q� �JӋ�@!� ������^�%Q��#>d�BGS#��(PF�Z$�Z^mU�^��J��r�K~��������t_��
+h^��J �c�,"��<�w����LTR ���E�J���Nz�e��V�R�z�DM\5�%��5�G��Lf�\?KЫ�:��0�թh����UM���{��9V�/��a>v*WFX�·+Q�˖��~�0���w�V����/��o��o��^�U;�s;׋q	�;���ȉk��cYTo�)���-WzC����L�D%�� �d��c�!;4�ݥ�om5�5��J�(�k�
+�V X��T��Ǧ�\�"^A��㮾�	j5��#0,���+�.ܝ\D�h]�{���㢯����#��
+��(E��0t�|Ј-���܂<�G�3*���%VX�U��
+�y,z�
+݅O��R��}�AB��X�1�̧>�bs�_�-��&��B�fc�*��׶��5=����Kp���8����Y��B��-�t�]<=�Y>]�kgC\�*5�C�}/G���a�sN��^�+�!s97�"4W6]�"{:���=�.��	MΑ�RDXV�j(�E��Y� R6مDQD��O�����@�4%�q&�nDݨ,�AL�d�11��6󇣪Q)���-�͈=b�O@�SHc#Q�߹�ZT�?ϭŐ���:��릩�/����W	_���Ꮁ�\wG{�?׀KG)�C��lٍg�s���C	�׸y(��,A�($	��F� �&U��NZldi�
+�'�RyYf�����c�e�+,'s��@4?(��z���$�{Sq�Ɓ2Y�7I���4�
+���Zմ0U��e���c����{&*�Xg����� ڴy�txh�y~�jv~rK�vE�)m����N�
+�~EϘ(��T�cj#�q�[G]��7��t�H7�'��Ј��g
+��̦������D������O���o���`tlZ�}�K�&k�44�v���P�/L��~��k_'��_��
+xScw-jh_�S2jO�N�^ ��bh�
+endstream
+endobj
+19 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/MediaBox [0 0 595.28 841.89]
+/Contents 17 0 R
+/Resources 18 0 R
+>>
+endobj
+18 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/ExtGState <<
+/Gs1 8 0 R
+>>
+/Font <<
+/F1 9 0 R
+/F2 10 0 R
+>>
+/ColorSpace <<
+>>
+>>
+endobj
+17 0 obj
+<<
+/Length 2471
+/Filter /FlateDecode
+>>
+stream
+x��\ˎc�
+��W��\d��A/�8��ѻ �=�,  �oփ�;ҽ��)
+M���N��<d	��>��=�\������W8���凿������ן<�����_��}�����~�Ƿ��R�ƕ�������������Z|=�bRB�:���r���L���*����g�{n������z��:���姷�_>>Z0a{�e|WX�y�IgAX�DQ9�vLn	@G�Gz}��"�	���O�#z= 2vz�e��O�_PL��E��~+O�W��*�l�Gk��.no�鬜�qm��+��<�H��T+�p�f=�^r%1�m�{S�=�z�u�B�}3dU�gh�oR���<X�ݎI	'N�U�܇�L҉� g �!�cw�H�^oO
+�D�t]j�8\F�|�qX�Y�bc]�@+��EE��܃����U���TM�W�e���B�u�$��Խ�Gҽ�ӫt����S���M�K��}DͥG�{{�x=��F�JV��]�B��h���(�)�47r�*,��b��t��ߛQ��5��P)"�I').� C�WgY�d��,L��	]�q�m��ZS��<�[����i���-sݳ�fS:>�@	;�W�ŦXe��-/�#b0�Zʐ߇ ��4~�u�p�\�H�.A?�$��Ft���h�Z"ܭBQG�Պ�,>V�woM�{;��9(�P��o����?���Y��檈[�:DZ��L@q��j�w?a�"9Ӎ?�)��d}�^�q�83��V
+ř�]�SO�AҺn��m+a��X���V(Am����Z�
+�s�*��ݙ����+��ȁ�\)�v�h����@����~>/�V��C6��
+r�k��/��zr�u��ڇ���q�,8���o�$mh��y��5L��֣^��a�<X��:�#�`ll������P��f�)�W���z\����W�t����q�K���9��P8�(�k�^�S��A�P1c}"�L�^q��(��X�sn$͒נ����}�2�2���U�����_@��,�*
+*m��$$�J���w��@����\wS9�z��X?�����ɀ����%�,�m���Wm���Q��m�媜���LlxG#�鴃	�1
+q��:i�#��idA�
+���Z�eq;�c��9ߞ;z�:��	p�%� �]Y��ʩ��L�R����9�5��ɱ5�$ �T+�S�����)*�pN��z#�;�O�' F�e�Tn��NTit��ΊJ��X7�f��OT)@�`��$d-?���E�#���=�1M�8�ރk�8>uvq��R�Yo���r/��6eQ�𤋮~�������В풻	V��uMd=�����V]���
+V�s ��>�T�Č$��&���K�;��d{�R�W��vb�mb,4K���AH�����^�EW��6?�������T�}��ZX#�4F�ރ�]9��|��x�~%ܵ$����B���7�#B�3H����g%hո!��U�Ir5Z6sbDB�2�q�������=����	H(�j��/�7�6yJ6gb�f�'M�J ��eG������k�tx/p�ĝ�ݩW���Zۤ������Z(.�`<��'�T�W�ё�
+j�L�)Z�(y�a"��s�/��U�*�U��P��E��KZ�ZX�!�L�iqar�T�):=�ҖŸ���8��˶ƍ	{ep�K�?�緓:�p=���V� ?&� a�D.�?w)"������o@������Zm�ĳ��5�xB�+�n1����[�ҍ��e��}Nri�e_�?�-�Փ}�Yq��
+� ��e|
+�~|�Ly�s��2n-���>#����@�Nͩ6�9����X��
+j��?^�����h��j�?d�P������.f{�#PFUq���̃"���r9t�?m�N�_�N�\'a%m�>����k�7�N�Yqs�W�r/�
+���O�^j�M�V#mL��[�K���=�Qamꤖ68�_#T�i[К��ې:�G�f� ��d]�8�k�-������f�����>d�u�Z���G��j����e�D><�� �]�e�	bkE1�v�iO	o�������5��m?m��bh
+�^65�Zz��O�~.�[g�V6��,N�`�D�n�G�"�팉�Iݱ����3�=T*�#�8/i��
+�cS�����.�N�)W/KLe#��Q��m���~l^U��;;/�-/K-�
+C�!��I��>nH������r,������}m�%M!I��Û�BWɐ�XxJɘ���B){������X4��k!�w"\Ql�*��~��֧6l��E�O�gm�.��49	�[�g'��Ҍ4�D���?������E�e�0i��/��`�D��w���=��6O�a�+r;E
+WM\�}?����U{;�[�l{W3/؟D�+l)P��C�p7�������
+endstream
+endobj
+21 0 obj
+(pdfmake)
+endobj
+22 0 obj
+(pdfmake)
+endobj
+23 0 obj
+(D:20260805083425Z)
+endobj
+20 0 obj
+<<
+/Producer 21 0 R
+/Creator 22 0 R
+/CreationDate 23 0 R
+>>
+endobj
+24 0 obj
+<<
+/Length 5873
+/Filter /FlateDecode
+>>
+stream
+x��YT׹�wfvvP��˲�J
+�(Ԓ�g���rR������gPWAEE]�D�ń(��!��q��"���`DE���('��iKS�G�<����}ߝ]���׾s��oggv���~~��]��W�CZ��4�`ޜ|�WH-��룀��eyC�_ ��K�;���j��u,�7t]����]�A�#
+�8��׏�����,�G������q���*��d4=���/�v�Kb��Kd�o �y��0b���E����ί�� /�8 ᕀς`@�9�*�~ <ˎ�w�8�B\*�E�.�y�4�	��@(�_� Z�`� �	!����I H�<@Bhx `�:��|�P�v@/B��9� �
+�p�� n@B:�E�2�Ё�֯�f ��!��a 4n8�P$�����"�-��#d� ��� k�S�O�LO `�e����W2G��m�1F�@�#� ��~�F=�B�a������ � ����PoP�V�*Q8r�>lC
+��8��0���Ji�<����p4E���8=~r���R� ��L�ɴ�ϻ����?وN�.0E�A������8�Uo��K�3��,���#��VI�mee%<6<c�1O����Y�,*�X�wx�R�M�'_���odx��k���ǫ����i�:�KBV�����[@ .fJ563�T*�7+�L!�Q�b�X�cÙ>���T����J�����q��A�!���Ȣ�D��t�k��BQd* �(TiEM�*]4�X�A��ҍD41��2��qQqcǏOINM��=��s��M��Y�}DW����o>d�cqF$[�X�X�+q��-[;� Ưp�l*]+A�Њ�R-��')���t��GJ>S���{�r�^,���L���rJ�n"H�xQ5�ԉXX1+�I]�pt�D~���05($��jUUl�����'�>�7��2�m��!9�a:�V��+ncz�NRb�$�\�=�8�`.O��%:��W'�!�4.�4�+1����}��ʚ�i\�"R�S�f�"�4��xޒ��lkc8$)f���R1ms�i�3�4�x����\�E�n���D�.��:%5%y�xK\J���2��Z�f�SL�(#��������_�n�z1{�,"ca�[��|�I#s.����
+ۖ�����x�������/3�J�־>��Ԓ�ӫ�׍��y�+>+Z|*���@s
+]{�k�yU���u�Pj��)I����ɫ
+��e�2�߷��=���kI8�[�i�j8W�.�~+)�QwsŎ������<Q�u�z�#%/k�2m�|bƣ�h2B�P����~1ρ@Q�P}dTc��ꍪ�4Œ+g��2H�I3j�U��D��<1��C"ƕ�Sӂn������B�:�Il��\@��-�a�P|�q�[�X�i&%d�j$Ѕޒb�`�R"Xmh���n�YQp���Ɨ����ք��~�z�X�nv��[q:oļ
+k��~0�x��kUeΚa���B��rZNŮ�Z
+���wNY�ӵ���k�A�Mx��k��*�R� �P��ǌE
+��h�c��$�
+�U¸P�O�4�.�e�|RZ�s��vr�㿓�v�~��g� �v�@}�p���yϼ�7}���)���uw����l��Y2:cʵַ/o�LH�K���2֐9Ң�;��X���Wzjfr�̯<�j-��۱c����v�E�r�M��`�D�/�����l�g|1>�Wju��3�
+`C�ş"	>ތ��!��p�]|R/3M����=r��ý������$[@��cǈ�Q\~v͚3���xxE�#� >��&����lfU�9N�^Vb��i�DXH2��%j����lڣ�)�tb�5>"�픤AW�!q�Tbc*'/���=�H�7�����"ՈC�n��	"%�Oxl<��l����nhHIf���Ll���]�$v������N�dc#�й�c�܎��'k��RG㥿�<ο���ϟ'5����|W=jj�0��|WSC�z5.�,	)�q�d~��2s�4�R��0L�e�[%��a�s�!�,��7���������UL&6��w{'���=���m��G�N��؇�T�=���1�ֺ�m~~���B޼Jݫ[r�&,y���OX3�0��Ix�鼵�}�]��W����>�G\�T[wgs�3X/oV��e��f��RE����qӨ��/Ot4��Q���c������P�&�!
+��&*\]��'r��A��Y|�u���=��d��K_��3s��1=�
+Ğ�y��^���\�]~���������Э�)�s2��s`޺���������,�1Lt�V�"H9	q��U}&$�G!S��5�
+t��R��Kʟ��9wl�ArLɩ��
+{���_�-?Q����O�O����cU{����Ŋ&�H����k�۽�x�۟���1�4g��Y�>k���-};��=�Lm38��q��8�M�:��"F�3г��1 =G�9�xۍu=x�u�3%7H����
+\�y8�o���k'N�kG��'N��OaJIW��I٬���� �{q^��$�</mi!��wplki�KC��#�X-��d��,&�%Lg�Ǥ��r�<f���M]�h��E�_��Ӣ��12�Ȭ2 ��	�X�|��塄�����Z�X�%�����˘���V�)fK��3�֡r1�`2U�0"3�g,RS�Z���9
+�����cJ�&�D��MM��y%��ܼ��/iIT�\]��q�KB&��;apQ-�3Zk�=b���Oѡq��T|/B�9�A�]�\s�ֺ��u��qw�� ��\!�L<�䌋�����%�,p;��2]Y��<�"��r���[���Y��q3�1�q�I�]8�J�+o�!�"Xî��ul��#�#!��h�`�#c�!㕲?JR����`�8��PZ#�:M�W��`:���jW6Xܥ��,t(�P%(��C�o�' ���P�Pc��ء���(���Diѳ6I�
+����f�jm��ĕ����v�M6[-V�լ:H��NT������R��8�hw�����������2f�\t����(?/ꚹ��_R>t��4WB����&5_��x���t�t2��6���>}֧���mb�ҷ���I��8����$	轻Ue
+�f#_�]_�K<�V�����u�o��{=��D�Џ�c5%�R�t�!�/�h�����~M�8|O��0~l{�R͆����G|d��6���\=���M�=�3�G�vբE�l���o�Fl�6�ȝ��+0m( |hs���
+������z�`���4�@#S�e���FF���$ ��C�J�� x%&�����m��`��h���U���X�iA	�2D�)V���`�9�&|�+g��^���W�;��z�@Uo�3�l�;�\��5�8gCN~�kZqw�_"{��������X����M~"��-TI*�,P{[j���8��<h"�y�!�P����Ȧ%;[�1����KLrL�H��y�iwb�X�)]\�,��mҗ�]�K>8�Az�q�.H�I:����^�kl�R�e*�w�a��/*p&�`�7㠖��zÁ��Ӓ#��:�r�O��/{H�b��_tדO}�)�;$��!��zWlËd��t�l\��7V
+�U(���?U��nV�E}�֒�jHKc�u�g�����pl.\N�_ee^��[��riU
+���J�r�u��~/�>J����-LP��#4��M�8[������rj%9�t��p!K�p�jE�mRK������?�>�\YI��T:�D�o_˽��d3X&�D'���
+����G֬i�'�l�����1��u��
+���{
+\j
+�.�#5�n��srٝ�� ������ɓ��������7n��
+�jg�q6n�Ўg�rKi��I������!����k��0N:w�ӶvVJn����9֎W3k��<�g���>�IL$�g��e��t
+ð��Q������t>2yS�H��v���o`w��lT�D�����3��� )���nj�`�-���!�z��ɏ����`ګ>L��}z�F�ct8^)aʈ��t���t7I@�v�j	6���A���r�'�#n{��i��u9
+�=��t��Pr��W�?�6qv��2�щ��95XH� ���j8��WC���=FL+��O-�g�2J=1��G����g��8���L���	����a�0��2X�&wv��X�E��Zͱm^��l^޳ Z�hѬg��E
+�j�rSP�C�!
+.Խ4�cL��X/�����gk��<�xg	��'���.�m�"@pҊWm��Y��m��j[�_+Z�S�bE��!��n4Q�8�i63�8�ר�v+�Fh��sy78��_��>�/�����iU�}�\ X�R��Ӵ���1��
+m8�I7��(1Ё��ؖ�l�J��jC�`����~H��UO�/�/��/=�{J��
+���?������	ּ���U[H���s�G�ξ�7s1��=X�τ�`5�`��Հ�E[�!��k{�ҥ1�ŸW��ۂ��V6Ζ���?n¦�/]8L���&�g���
+w�2�Њ&���&dw��H�Ibԉ�-ޭn��|�����Lc��/Y@��Gj!h8�1*��Q�p����r��ý�5M�T���iJK�!�
+�%��:X��BT*��q7��"J6���(#2�p<Ӡ$��(�0�۟��n��cQCԷ�d�$�l��q�g�$��6���&\�`!W9�����@ '[�-zȌ�Q��44���6r-�T(�����I�.�琫�T:����k'[1�0�b�:���N��}�	�
+�|����ݡ�LMZ�[�"�s�p�,G�l�:���#�[+��G�p�۶V^��w�������6����Gv��[7Ab�!r��]x��kv�K�P$$�҂`�l�nf�St�@����[BLMI�Gxt[�e��V�,���%]Jz ������e�	t�����Tu����P�"!H�C:X����d8J�;W��,��9�g[��uMϮW߰�h\�d@y�,<`�O�p����
+F܄͸Ɉ�J'�P��d��J�2
+�{��8����	
+݆��߆�XR��wx�zLm��r��������1�/�YY��txk��տY���h�'+5>��8�ȧX����3׏����o���b�����\Z���W^xw��o�w�{�o�.��=��ܭmո�|b��2E[��KG�&���9��%��KS��}Fi�oj7}�ˢ�*r�
+L�q	�v��_��.{]��C�CG��-�xZ����O�K}1�	���\��ƥIH�U��D��}���Vm�?T��0��?�� .<�Fv��#'�i�H�����s�=]�g�
+/nmÓ�&���$����G�D�
+nV��3M�ܴP��z]n��2_�ε(~	�;4.�6ءI.�r�攬�8���HJ؏��}$����	(�C��
+�}G��K��?CJ�]�9T@Y���K�\l���z����&��+W�_\�^m��f4��}�nk�eq(�h�I�ڛ>+�\�,�@�9X���J�0��,d�]��7!o����'�ur�@��^��t�R��t��dx���%(G������y��[�	���VT�!4]�9�Hfz�>_Dɂ��5�=Cˡ:�m=�$$�����_�C�P�x)`N��Z8kA�$�2iu�\ �4}�%��}�<��2�0�&yY#j���0OX9��kAi���A1��I����� �e��Zu�:'߅\p���>���QYr�-��ۃ����F�Հ,�>;�χߺ@FЁ6	�E瑑s�e�!;���0��6�|H����o��c�
+endstream
+endobj
+25 0 obj
+<<
+/Type /FontDescriptor
+/FontName /BZZZZZ+Inter-Regular
+/Flags 4
+/FontBBox [-738.636364 -319.602273 2583.096591 1090.909091]
+/ItalicAngle 0
+/Ascent 968.75
+/Descent -241.477273
+/CapHeight 727.272727
+/XHeight 545.454545
+/StemV 0
+/FontFile2 24 0 R
+>>
+endobj
+26 0 obj
+<<
+/Type /Font
+/Subtype /CIDFontType2
+/BaseFont /BZZZZZ+Inter-Regular
+/CIDSystemInfo <<
+/Registry (Adobe)
+/Ordering (Identity)
+/Supplement 0
+>>
+/FontDescriptor 25 0 R
+/W [0 [2800 751.420455 596.590909 609.375 826.704545 582.386364 563.920455 561.079545 281.25 536.931818 534.090909 1000 752.840909 596.590909 634.943182 589.488636 494.318182 558.238636 582.386364 561.079545 596.590909 573.863636 586.647727 563.920455 522.727273 363.636364 676.136364 634.943182 264.204545 582.386364 623.579545 812.5 596.590909 609.375 372.159091 582.386364 637.784091 761.363636 562.5 275.568182 721.590909 539.772727 750 750 589.488636 556.818182 680.397727 650.568182 742.897727 752.840909 642.045455 816.761364 541.193182 740.056818 727.272727 356.534091 718.75 458.806818 279.829545 634.943182 553.977273 866.477273 727.272727 639.204545 741.477273 460.227273 362.215909 362.215909 460.227273 464.488636 642.045455 650.568182 237.215909 541.193182 556.818182 620.738636 237.215909 585.227273 761.363636 889.204545 556.818182 664.772727 869.318182 605.113636 654.829545 539.772727 544.034091 812.5 362.215909 580.965909 620.738636 676.136364 651.988636 362.215909 542.613636 948.863636 636.363636 558.238636 670.454545 642.045455]]
+/CIDToGIDMap /Identity
+>>
+endobj
+27 0 obj
+<<
+/Length 445
+/Filter /FlateDecode
+>>
+stream
+x�]SMo�0��W���m�� �J�p؇�v�vhUiʁ�4�0�J�d��~v�t�{ڹ~�̞&���z:
+goH�t�]�Ka{3��ͱ�4����Dǝ���$B����4��X<ڡ�����-����s����y�HnYR��R�=7�Ks$�F�rg�y?]����qI�h�dK��1�w�d����t�r��1���>Z�E-�n��U��"(8
+� 8U��C8e �q�|�3��,-��3�U$`�������U@���(�� �@�\����U���%�)��0��4���W�%!�U<����'�A�!�.!P���xȊ��Mɽ�^�V$r�`}�,� 9� �V
+ �V4[�/�
+�RrW��)N��U�+� W�x$�X��9K	Dc�׎T�=?�볞������2g��:�E�{4oP����0ά��z��
+endstream
+endobj
+9 0 obj
+<<
+/Type /Font
+/Subtype /Type0
+/BaseFont /BZZZZZ+Inter-Regular
+/Encoding /Identity-H
+/DescendantFonts [26 0 R]
+/ToUnicode 27 0 R
+>>
+endobj
+28 0 obj
+<<
+/Length 4865
+/Filter /FlateDecode
+>>
+stream
+x�uX\�ֿgfwv("KY� �.bI����3��hA�D)��H�S�
+�D
+Qc�X���%/��X�Xb��[|Ϛ|ID���w��b����vfv�sO��[�W��tlX����I��7�`Π��:�o��Զ�ˌ���3r���7�|r����C褛�=3�v?�1w%cj�����5׿�4'pb��O�k��~��5�y=v�����^�����G�)��Tܴ��^���W��l���%�6��j��O�@B$�C�U�ҍ�KXHj�{	��i�	����p��;cZwBcR{�d�f=�ѽ�~�+$�D��1y0a)�G��	�	cw�fF ]�?#�g�a��p�1G����0�PKha�Y���9�""<a�=���"B5c�΄"���	oH����3��C�Ihe̕��z�1��4����)���*��j�(��9�\����Y���.ګ)aZ0)��S싙H?s`�+�To��?��5}�W(�C&�g������yM/]A&7�dK�L�Ac�HG|^��9���_P���Z�	��8�˴]����w7I��Ԓ�Ԥ���KRS�/O2upk+%�M2$FG�5J��Pr�����0r��Ŀ�^
+�;I�5�#����B��L�
+�A��/~�����O���T�]�F����35���/"5������R7��a/_�A�h4$ ��>0�k�fl�?�[BW�p�'Sv
+1�di��O4�Ma�������`0�X.�I�ڨ�^I#g�yuP�@=�8�`�F�����J}W���>Xz��ZMFs���i�P�E{�$Z]���m*�-7��m_�k�&$�m�<�I����U'5�� Fa��������.��d��~�~f_~IZjz���Y +�:�8�77 l �IaWK�r���9o��qŚ;Edm�M�?��%2և�tut�`�и��	S_A�̺�
+f�7����L]�w7�v����V��,pi?����Э� ���}�s�BUޡe�Ô�Q�JS����9��E!��W%;��[p�W�a.x�^<5���������S֥��C�Ih���&�������oU���^��H:�����!�s�&�$��_T��'g���4���Ԭi&�0M���� ��M+'V$nū_��;`_��䄾c��G�Ј���,=�3���Y�&g)�2k�٩Y���I��@^�U'�A�q&ߘԠ��p-lJ�Ѫ�1�h5��X#� /�⳥�L^�O�qL�KK��O�A	o�"J�
+s�t���%m�?&��ذ�	-]��yw�M�U�5:�1D�j��s% Dv��W�.�:I�?``�'�i��+�b��~��n>˿�>�^D[�1�@L�݄���0T�!��\΂h4w�����E��p�D,��7yk��k�p�R�OS��@v�c���RJ
+?�,.R��ȶ՜�xTs���2S$ƳZ}��4ɑ27�3�b=X��(�KI�u�^��b� <4��F�l�!~�q\-^�TPp	|k##{��8�w�f�cdd-���x�����ݔ�[i�����/�iO-�.�7�b��9ے���?���/���=x�b>��;wkҼ�-��0�] �%fϜ�"���zk̰	�Q����AM��_e�G[�[A�$� ��;1Ok��-�e�i#-)0�wH���O~�}0�`Әûq��p=�V��cG��H�-������
+��U���aW�#|#��a��Y�����ް4�nrW����
+�S����ub��0|�^��HQ�9UQQ�s��j���Y<�ƭOK_ۜb(���U�*�b$�l�
+�<�с���Q�Pkų+{���ѢA�u���O1�E&5
+��~B��5hq)^�b����/]$����k�z��w�~�p形!ѥ���c�~��{ �?�1�
+U�+�E�/x7�4��o^�Ojn��z��)��8cQc�����\�$	4w����$�|��.��ڦ�	��{�l�0܏�l���SN[D��{
+�<���!8*�e���%��"Y�V�@�l5�(	�d-�#��4+1yڍ\���!:hFC����ij�����6��:u$��}�Z���g�^��pނ�x�ғ�10k)��,�t��o�e�ovL�t�<屪0��&����j��X��g�MȞ�g�p�9g �:i��E��XC���x�o�*
+��X'�@O!P0`�^y���'zL�Y�&m�s�
+j�Aۧ�$��3u(���|�W�n*!�e�̚Inj����NK�՞u"_��
+��.��\DgA�.b�@�&�n.�K���埂,E�{&�*�C��o�n�h��>{�=��`L�H��
+���J�ʨV'��|���s�ǒRz��f���-4J��~�K��w��`���� �<�D��:��N�
+��ϔ`܆�镶ޕe/������ޕ��8[����-�U�-��2�:�5�t���� h��7��Q��5	k'������ȑ��ƍ//b�xF]�!� ?���n�Z�}#���]4Bޙ5�p����ZpZW�/6��ٹS�=����u�e���n�����	��m�k�[�;�K��,ߊ����y��oe�mդF;�(x�i�G�����j�"�HQ�Rڶ���g�x~�ղ��f"�T��,_�
+!�P+D�Z!h�%�Ȝ*��RM��>�/ǁ�n�g�e�k b���ݲ�?õ�}�v�s� ��v)*cd���s�Ä��+�@� X����'����8�?拝�[�V!NEg�-a����D�k���a
+*��j�%�$�+��I��A�$�|V�JH��n�QB��,���ey�g��]D+I�o[��O��nD��Xm,T
+��K����u_�W�%l���7%k�Z�9����0t�p�zm �ڿ�N��̮N��AC5}q��>i7�?�9h3�!��^���ޑPH-Z�~D4�5r=�~j��m�X�+	6��6���,�«���9�w�
+c;lz��w�S�����UMjݛ�1>nä�E�	�^�� �C(>�>�ݞ5��yCw�����!6�:=}sR�I�R�SHKJD�i)2?%�Z�%(H-+����F�N��V��f)Q6����6~��W�>����(���:�B�s8�)�欦?���֭�o�4�{�����0��'����e�|Xo��*�Q�	�j�%��Rp��`a�C�����}`/I�9���/��A.i]ںS�M���1�n�1���(1;_Wޅy#|�.D��x
+N7��+WpA����+Wa�Ӆ�����ù'�N=��5L��~�K�	��4BN3���p͔K��==)��ǟ\�2�} ϰ9T�V��k��*#��|Ԋ9T��p=Y�Ƹ)!;[c5�%Mx5���I�qסC0��}s���wf���Y��w�=zi
+
+���#\� a3/,^|a�,~�I�����˛�Ah�
+O:�D�Nz��������k���?*L]�:uD�(G(�߁��!��#Hk,��u�%Yg?Z�mv�����t
+MͶ�d]�Y]��ҟ1"�ª����Ō�dr\�d��D��BҪ{�&l�.oqu�ߦ�`�����ǡ�31۱�����nCǎ5��
+)�4����ݙf��oI3��}�����_�����odqTU;w};�C������X�y�+��ؗ\�I3Y���;�dK���h�'Gk�^r}��Ƴy)1x��!���]K��w?J���a�߄0Z�� "ZӶ^��v�z�i\D�:VAJ�˅$��5@�W�Hj����%K&T�v�(n|Q���"�J'B2�܌W`�z�+�5P����<�0/��7&��%
+�X�J��b;���,�ID:-~ϐ�z�4������Ck0���Ƿ[W5 �Ru�ʽG���h��,�!Ya�����k�x�~�坡ʵ,/�C��I�t����-"5a��Qo��ѷ��-�w�Z��K7��H��7o�\}��������L��
+ym#���Ty$?�`�%���~ݻ�s�O����ղ�ے����"~c��(M8Y���u�xA�#�*�w��4)ZŹ����j���+k׼m�U���g���N���WN�X92l唌�J�<1d޸=�)>�V�d��A���A���n��y9��]��R�f'�=��NБ>�c(4�(<OEo8���D��M]�)LpU�jص�?q�_IWZ�R�6�q��I��h}��wP}���t'rZ~�G����q�n�z��,�>�׽�B��!�T�1�z���Ҩ��^�m��>�_�ҋ��v�ʺm���"���u	��9I͔��B�ٓ��%W�	2J\%q*� |z�.6A7H���({�q��Мl"�2���� ��%{�z�E� r�9(�� �� B8��܉�=�N���<k����Z@��%_Ao��`�\\���dG���?�FX,PG˝��O��TV>�g=k1�Ϟ�e� n|��3쉵W�gE^�6q��z��l���7��U��|�Kd۠��sAK�k1�6�Z��5��\�x����[��3�c�,�r%����3��{�ig]-�j]
+)�
+b�AׁQ�>�-�A~e�CK
+_����4�9,�6����}B	����P�)��F�a�a�4�xi˖��u�#ͧ��"%�	�16]{�%H�����y=��%1M1%g���άF��e�y�Fד�q�:V'X�֏�<ae�άN*��,B��j�]ӻ5� ���qe�D�+�P�����2]#�[�j�I�PV�+dK춱a��O��v�w�B�b��T�e�vŬTJ�1!�U՛�" ��vgG5!�]Wh����X�fyi��:�v���@�����Eg�
+endstream
+endobj
+29 0 obj
+<<
+/Type /FontDescriptor
+/FontName /CZZZZZ+Inter-Bold
+/Flags 4
+/FontBBox [-844.815341 -319.602273 2583.096591 1113.28125]
+/ItalicAngle 0
+/Ascent 968.75
+/Descent -241.477273
+/CapHeight 727.272727
+/XHeight 545.454545
+/StemV 0
+/FontFile2 28 0 R
+>>
+endobj
+30 0 obj
+<<
+/Type /Font
+/Subtype /CIDFontType2
+/BaseFont /CZZZZZ+Inter-Bold
+/CIDSystemInfo <<
+/Registry (Adobe)
+/Ordering (Identity)
+/Supplement 0
+>>
+/FontDescriptor 29 0 R
+/W [0 [2956 489.346591 297.585227 231.889205 747.869318 632.457386 573.863636 611.150568 557.883523 597.65625 585.582386 585.9375 591.619318 580.255682 578.125 614.346591 526.633523 587.357955 576.349432 613.636364 670.454545 409.090909 764.914773 465.553977 793.678977 767.755682 651.278409 747.869318 647.727273 280.539773 858.664773 656.960227 629.971591 914.772727 590.909091 604.758523 588.068182 818.181818 611.150568 409.090909 914.772727 747.869318 688.210227 409.090909 730.113636 781.960227 659.446023 707.741477 597.65625 947.443182 660.866477 677.911932 877.840909 671.164773 644.53125 647.727273 660.15625 700.284091 302.911932 863.636364 581.321023 567.471591 613.636364 587.357955 580.255682 272.017045 468.75 385.653409 272.017045 408.735795 561.789773 388.494318]]
+/CIDToGIDMap /Identity
+>>
+endobj
+31 0 obj
+<<
+/Length 384
+/Filter /FlateDecode
+>>
+stream
+x�]S�n�0��>��lH$�T���PӞ��^"�� ���5�m�	F����u��=�\?���fO��zg=���7$Z:�.�J��L����1I�x9MtܹnU�����i����CKws��[�;���v#��8~ё�$�����.�{lƧ�H"���Ά|?]�Au[�vI��%,���il��(����U�:!g��Y�v�W� ���Ǎ�2�"@j	���L�q�A0� �u`P"Ȍ�@���Y��Z��`U�o	:�l$t����`���(fQ��d�A qXlP�r�f/Ra	��Ŵ���)��C[g
+:	�fE@��ȱ���;*a������<(?#1��<��y4g��(�Kgp��������8���
+*���
+endstream
+endobj
+10 0 obj
+<<
+/Type /Font
+/Subtype /Type0
+/BaseFont /CZZZZZ+Inter-Bold
+/Encoding /Identity-H
+/DescendantFonts [30 0 R]
+/ToUnicode 31 0 R
+>>
+endobj
+4 0 obj
+<<
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/Names 2 0 R
+>>
+endobj
+1 0 obj
+<<
+/Type /Pages
+/Count 4
+/Kids [7 0 R 13 0 R 16 0 R 19 0 R]
+>>
+endobj
+2 0 obj
+<<
+/Dests <<
+  /Names [
+]
+>>
+>>
+endobj
+xref
+0 32
+0000000000 65535 f 
+0000026274 00000 n 
+0000026352 00000 n 
+0000026212 00000 n 
+0000026191 00000 n 
+0000000321 00000 n 
+0000000175 00000 n 
+0000000065 00000 n 
+0000000015 00000 n 
+0000019254 00000 n 
+0000026046 00000 n 
+0000003010 00000 n 
+0000002863 00000 n 
+0000002750 00000 n 
+0000006044 00000 n 
+0000005897 00000 n 
+0000005784 00000 n 
+0000008552 00000 n 
+0000008405 00000 n 
+0000008292 00000 n 
+0000011185 00000 n 
+0000011097 00000 n 
+0000011123 00000 n 
+0000011149 00000 n 
+0000011261 00000 n 
+0000017208 00000 n 
+0000017473 00000 n 
+0000018736 00000 n 
+0000019401 00000 n 
+0000024340 00000 n 
+0000024601 00000 n 
+0000025589 00000 n 
+trailer
+<<
+/Size 32
+/Root 3 0 R
+/Info 20 0 R
+/ID [<1917e188927704317bb26dc1e2cfd740> <1917e188927704317bb26dc1e2cfd740>]
+>>
+startxref
+26399
+%%EOF
+```
+
+================================================================================
+Файл: project_info/Road_map.txt
+Формат: .txt
+Размер: 84 строк
+================================================================================
+```text
+Дорожная карта
+1. Архитектурная база и серверное ядро
+а) Подготовка фундамента
+— Инициализация серверной части на FastAPI и настройка подключения к PostgreSQL.
+
+— Проектирование схемы базы данных с учетом хранения дат в формате BIGINT для поддержки событий до нашей эры.
+
+— Настройка базовых CI/CD пайплайнов для автоматического тестирования кода, сгенерированного ИИ.
+
+б) Базовое API и маршрутизация
+— Создание эндпоинтов для базовых CRUD-операций (создание, чтение, обновление, удаление) над историческими событиями.
+
+— Реализация пространственно-временных SQL-запросов для выборки событий по диапазону дат.
+
+— Подготовка пустого клиентского приложения с настроенным роутингом для последующего вайбкодинга интерфейса.
+
+2. Математическая модель шкалы и базовый рендеринг (MVP 1.0)
+а) Логика оси времени
+— Разработка математического ядра на клиенте для пересчета экранных пикселей во временные метки.
+
+— Реализация бесконечной горизонтальной оси X с динамическим изменением шага сетки (от столетий до секунд).
+
+— Настройка жестового управления и зуммирования с помощью колеса мыши относительно положения курсора.
+
+б) Отрисовка событий
+— Внедрение алгоритма асинхронной подгрузки данных (lazy loading) при смещении или масштабировании шкалы.
+
+— Вывод базовых маркеров событий на ось без сложного форматирования.
+
+— Важным скрытым аспектом является управление памятью браузера, поэтому старые DOM-узлы или элементы Canvas должны удаляться при выходе за пределы экрана.
+
+3. Компоновка интерфейса и предотвращение коллизий (MVP 2.0)
+а) Вертикальное стекирование
+— Создание алгоритма распределения событий по оси Y для параллельных или пересекающихся исторических периодов.
+
+— Настройка автоматического расчета высоты блоков во избежание визуального наложения элементов друг на друга.
+
+— Интеграция логики изменения плотности событий в зависимости от текущего уровня приближения (zoom level).
+
+б) Детализация сущностей
+
+— Подключение боковой панели или модального окна для просмотра полного описания события.
+
+— Реализация иерархических тегов, позволяющих объединять мелкие события (минуты) под общим вековым событием.
+
+4. Пользовательский контент и слои отображения
+а) Управление направлениями
+— Внедрение системы цветового кодирования категорий (культура, политика, экономика).
+
+— Создание механизма изменения порядка слоев (z-index) и настройки их прозрачности.
+
+— Добавление быстрых фильтров для скрытия нерелевантных направлений на клиенте.
+
+б) Обогащение данных
+— Интеграция Markdown-редактора для форматирования текста в описаниях событий.
+
+— Настройка парсеров для корректного встраивания внешних медиафайлов (YouTube, VK) и аудиолекций.
+
+5. Ролевая модель и система модерации
+а) Аутентификация и безопасность
+— Внедрение системы JWT-токенов и разделение прав на гостей, пользователей и администраторов.
+
+— Реализация механизма теневых копий, при котором отредактированное или новое событие сохраняется в буферную таблицу.
+
+б) Панель управления
+— Разработка интерфейса модератора для просмотра, редактирования и одобрения заявок.
+
+— Интеграция функционала мгновенной публикации событий администратором без прохождения очереди.
+
+— Настройка параметров персонализации, где новый пользователь задает свою стартовую дату для шкалы.
+
+6. Экспорт, локальность и децентрализация (Финальный релиз)
+а) Генерация документов
+— Создание серверного скрипта для конвертации горизонтальной выборки событий в вертикальный лонгрид.
+
+— Настройка библиотеки для экспорта сформированного лонгрида в PDF-формат.
+
+б) P2P и Local-first архитектура
+— Внедрение технологии Service Workers и IndexedDB для кэширования приложения и обеспечения офлайн-работы.
+
+— Подключение протоколов WebRTC для прямой синхронизации локальных баз данных между пользователями без участия центрального сервера.
+
+— Этап децентрализации вынесен в конец, так как он кардинально меняет парадигму хранения данных и не должен тормозить релиз облачной версии.
+
+```
+
+================================================================================
+Файл: pytest.ini
+Формат: .ini
+Размер: 22 строк
+================================================================================
+```ini
+[pytest]
+# Автоматическое определение асинхронных тестов плагином pytest-asyncio
+asyncio_mode = auto
+
+# Явная фиксация области видимости цикла событий для асинхронных фикстур
+asyncio_default_fixture_loop_scope = function
+
+# Регистрация корневой директории в sys.path для корректных импортов пакета app
+pythonpath = .
+
+# Корневой каталог для обнаружения тестовых сценариев
+testpaths = tests
+
+# Шаблон сопоставления файлов с тестами
+python_files = test_*.py
+
+# Флаги запуска: подробный отчет (-v) и сквозной вывод stdout/логов (-s)
+addopts = -v -s
+
+# Фильтрация предупреждений об устаревших вызовах внутри pytest_asyncio
+filterwarnings =
+    ignore::DeprecationWarning:pytest_asyncio.*:
+```
+
+================================================================================
+Файл: requirements.txt
+Формат: .txt
+Размер: 30 строк
+================================================================================
+```text
+alembic==1.19.1
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+asyncpg==0.31.0
+click==8.4.2
+colorama==0.4.6
+fastapi==0.141.1
+greenlet==3.5.5
+h11==0.16.0
+httptools==0.8.0
+httpx==0.28.1
+idna==3.18
+Mako==1.4.1
+MarkupSafe==3.0.3
+pydantic==2.13.4
+pydantic-settings==2.15.0
+pydantic_core==2.46.4
+pytest==8.3.4
+pytest-asyncio==0.25.3
+python-dotenv==1.2.2
+PyYAML==6.0.3
+ruff==0.9.9
+SQLAlchemy==2.0.52
+starlette==1.6.0
+typing-inspection==0.4.3
+typing_extensions==4.16.0
+uvicorn==0.52.1
+watchfiles==1.2.0
+websockets==17.0.1
+```
+
+================================================================================
+Файл: scripts/dump_project.py
+Формат: .py
+Размер: 207 строк
+================================================================================
+```python
+import os
+from pathlib import Path
+
+# запуск (python scripts/dump_project.py)
+
+# Список исключаемых директорий (виртуальные окружения, кэш, служебные папки)
+IGNORED_DIRS: set[str] = {
+    ".venv",
+    "venv",
+    "env",
+    ".git",
+    ".idea",
+    ".vscode",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".kilo",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".ruff_cache",
+}
+
+# Расширения бинарных файлов, баз данных, логов и медиа, исключаемые из выгрузки
+IGNORED_EXTENSIONS: set[str] = {
+    ".pyc",
+    ".pyo",
+    ".log",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".sqlite3",
+    ".db",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".svg",
+    ".ts",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".map",
+    ".jsonc",
+    ".lock",
+    ".d.ts",
+}
+
+# Имена файлов, исключаемые из выгрузки
+IGNORED_FILENAMES: set[str] = {
+    "project_context.txt",
+    "package.json",
+    "package-lock.json",
+    "kilo.jsonc",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "agent-manager.json",
+    "History_Project_info.pdf"
+}
+
+# Маппинг расширений файлов к языкам разметки Markdown для подсветки синтаксиса
+LANGUAGE_MAPPING: dict[str, str] = {
+    ".py": "python",
+    ".ini": "ini",
+    ".txt": "text",
+    ".md": "markdown",
+    ".sql": "sql",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".json": "json",
+    ".mako": "mako",
+    ".html": "html",
+    ".css": "css",
+    ".js": "javascript",
+}
+
+
+def should_ignore_file(file_path: Path) -> bool:
+    """Определяет, должен ли файл быть исключен из обработки."""
+    if file_path.name in IGNORED_FILENAMES:
+        return True
+    if file_path.suffix.lower() in IGNORED_EXTENSIONS:
+        return True
+    return False
+
+
+def get_syntax_language(file_path: Path) -> str:
+    """Возвращает идентификатор языка для блока Markdown-подсветки."""
+    if file_path.name == ".gitignore":
+        return "gitignore"
+    return LANGUAGE_MAPPING.get(file_path.suffix.lower(), "text")
+
+
+def generate_ascii_tree(current_dir: Path, prefix: str = "") -> list[str]:
+    """Рекурсивно формирует текстовое дерево каталогов проекта (ASCII Tree)."""
+    tree_lines: list[str] = []
+    try:
+        entries = sorted(
+            list(current_dir.iterdir()),
+            key=lambda item: (item.is_file(), item.name.lower()),
+        )
+    except PermissionError:
+        return tree_lines
+
+    # Фильтрация объектов дерева
+    valid_entries: list[Path] = []
+    for entry in entries:
+        if entry.is_dir() and entry.name in IGNORED_DIRS:
+            continue
+        if entry.is_file() and should_ignore_file(entry):
+            continue
+        valid_entries.append(entry)
+
+    for index, entry in enumerate(valid_entries):
+        is_last = index == len(valid_entries) - 1
+        connector = "└── " if is_last else "├── "
+        tree_lines.append(f"{prefix}{connector}{entry.name}")
+
+        if entry.is_dir():
+            nested_prefix = prefix + ("    " if is_last else "│   ")
+            tree_lines.extend(generate_ascii_tree(entry, nested_prefix))
+
+    return tree_lines
+
+
+def scan_project_files(root_dir: Path) -> list[Path]:
+    """Выполняет рекурсивный сбор всех подлежащих выгрузке файлов."""
+    collected_files: list[Path] = []
+
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        # Модификация списка на месте для предотвращения обхода игнорируемых папок
+        dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS]
+
+        current_dir = Path(dirpath)
+        for filename in sorted(filenames):
+            file_path = current_dir / filename
+            if not should_ignore_file(file_path):
+                collected_files.append(file_path)
+
+    return sorted(collected_files)
+
+
+def main() -> None:
+    """Точка входа: сборка контекста проекта в единый текстовый файл."""
+    root_dir = Path(__file__).resolve().parent.parent
+    output_file_path = root_dir / "project_context.txt"
+
+    target_files = scan_project_files(root_dir)
+    tree_structure = [f"{root_dir.name}/"] + generate_ascii_tree(root_dir)
+
+    total_lines_count = 0
+
+    with open(output_file_path, "w", encoding="utf-8", errors="replace") as report_file:
+        # Формирование заголовка и схемы дерева файлов
+        report_file.write("=" * 80 + "\n")
+        report_file.write(f"СТРУКТУРА ПРОЕКТА: {root_dir.name}\n")
+        report_file.write("=" * 80 + "\n\n")
+        report_file.write("\n".join(tree_structure))
+        report_file.write("\n\n\n")
+
+        # Последовательная запись каждого файла проекта
+        for file_path in target_files:
+            relative_path = file_path.relative_to(root_dir).as_posix()
+            file_extension = file_path.suffix if file_path.suffix else file_path.name
+            syntax_lang = get_syntax_language(file_path)
+
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="replace")
+            except Exception as read_error:
+                content = f"// Ошибка чтения содержимого файла: {str(read_error)}"
+
+            file_lines = len(content.splitlines())
+            total_lines_count += file_lines
+
+            # Формирование метаданных и тела файла
+            report_file.write("=" * 80 + "\n")
+            report_file.write(f"Файл: {relative_path}\n")
+            report_file.write(f"Формат: {file_extension}\n")
+            report_file.write(f"Размер: {file_lines} строк\n")
+            report_file.write("=" * 80 + "\n")
+            report_file.write(f"```{syntax_lang}\n")
+            report_file.write(content)
+            if not content.endswith("\n"):
+                report_file.write("\n")
+            report_file.write("```\n\n")
+
+    file_size_kb = output_file_path.stat().st_size / 1024
+
+    # Вывод сводной технической информации в терминал
+    print("\n" + "=" * 60)
+    print("ВЫГРУЗКА КОНТЕКСТА ПРОЕКТА УСПЕШНО ЗАВЕРШЕНА")
+    print("=" * 60)
+    print(f"Обработано файлов     : {len(target_files)}")
+    print(f"Всего строк кода      : {total_lines_count}")
+    print(f"Размер выходного файла: {file_size_kb:.2f} KB")
+    print(f"Расположение файла    : {output_file_path.resolve()}")
+    print("=" * 60 + "\n")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+================================================================================
+Файл: tests/conftest.py
+Формат: .py
+Размер: 40 строк
+================================================================================
+```python
+from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock
+
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+
+
+@pytest_asyncio.fixture
+async def mock_db_session() -> AsyncMock:
+    """
+    Асинхронная фикстура для создания объекта-заглушки (mock) сессии базы данных.
+    Имитирует асинхронное поведение AsyncSession без выполнения реальных SQL-запросов.
+    """
+    # Инициализация асинхронного мок-объекта сессии
+    session = AsyncMock()
+    return session
+
+
+@pytest_asyncio.fixture
+async def async_client() -> AsyncGenerator[AsyncClient, None]:
+    """
+    Асинхронная фикстура для создания изолированного тестового HTTP-клиента.
+    Обеспечивает маршрутизацию ASGI-запросов и гарантированную очистку переопределений зависимостей.
+    """
+    # Инициализация прямого транспорта ASGI без открытия реального сетевого сокета
+    transport = ASGITransport(app=app)
+
+    try:
+        # Открытие асинхронного контекста HTTP-клиента
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+        ) as client:
+            # Передача сконфигурированного клиента в тестовый сценарий
+            yield client
+    finally:
+        # Гарантированный сброс всех мокированных зависимостей FastAPI после завершения каждого теста
+        app.dependency_overrides.clear()
+```
+
+================================================================================
+Файл: tests/init.py
+Формат: .py
+Размер: 0 строк
+================================================================================
+```python
+
+```
+
+================================================================================
+Файл: tests/test_health.py
+Формат: .py
+Размер: 80 строк
+================================================================================
+```python
+from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock
+
+from fastapi import status
+from httpx import AsyncClient
+
+from app.core.database.database import get_db
+from app.main import app
+
+
+async def test_docs_available(async_client: AsyncClient) -> None:
+    """
+    Проверка доступности интерактивной документации Swagger UI по корневому пути /docs.
+    """
+    # Выполнение асинхронного GET-запроса к эндпоинту документации OpenAPI
+    response = await async_client.get("/docs")
+
+    # Валидация успешного статуса ответа 200 OK
+    assert response.status_code == status.HTTP_200_OK
+
+
+async def test_health_endpoint_success(
+    async_client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """
+    Проверка успешного ответа эндпоинта /api/v1/health при штатной работе базы данных.
+    Использует локальный асинхронный генератор для подмены зависимости get_db.
+    """
+    # Настройка успешного выполнения асинхронного SQL-запроса
+    mock_db_session.execute.return_value = None
+
+    # Локальный асинхронный генератор для строгого соответствия контракту get_db
+    async def override_get_db() -> AsyncGenerator[AsyncMock, None]:
+        yield mock_db_session
+
+    # Регистрация генератора в реестре переопределений зависимостей FastAPI
+    app.dependency_overrides[get_db] = override_get_db
+
+    # Отправка GET-запроса к диагностическому роуту
+    response = await async_client.get("/api/v1/health")
+
+    # Валидация HTTP-статуса и структуры возвращаемых данных схемы HealthResponse
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["db_connected"] is True
+    assert data["version"] == "1.0.0"
+
+
+async def test_health_endpoint_db_failure(
+    async_client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """
+    Проверка обработки сбоя базы данных эндпоинтом /api/v1/health.
+    Использует локальный асинхронный генератор и эмулирует исключение при запросе.
+    """
+    # Имитация исключения при выполнении запроса к БД
+    mock_db_session.execute.side_effect = Exception("Сбой соединения")
+
+    # Локальный асинхронный генератор для строгого соответствия контракту get_db
+    async def override_get_db() -> AsyncGenerator[AsyncMock, None]:
+        yield mock_db_session
+
+    # Регистрация генератора в реестре переопределений зависимостей FastAPI
+    app.dependency_overrides[get_db] = override_get_db
+
+    # Отправка GET-запроса к диагностическому роуту
+    response = await async_client.get("/api/v1/health")
+
+    # Проверка возврата статус-кода 500 и текста ошибки в теле ответа
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    data = response.json()
+    assert (
+        data["detail"]
+        == "Ошибка подключения к базе данных: Сбой соединения"
+    )
+```
+

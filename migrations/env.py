@@ -14,7 +14,7 @@ from alembic import context
 
 # Импорт конфигурации приложения и сущностей ORM для регистрации схемы в метаданных
 from app.core.config.config import Settings
-from app.models import Base, Event
+from app.models import Base
 
 # Получение объекта конфигурации Alembic из файла .ini
 config = context.config
