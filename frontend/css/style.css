@@ -1,0 +1,98 @@
+/* Определение глобальной палитры и системных переменных интерфейса (Dark Mode) */
+:root {
+    --bg-primary: #121214;
+    --bg-secondary: #1a1a1e;
+    --bg-accent: #26262b;
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --color-accent: #3b82f6;
+    --color-success: #10b981;
+    --border-color: #2e2e33;
+}
+
+/* Сброс базовых браузерных отступов и фиксация блочной модели расчета размеров */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Базовая конфигурация холста документа и типографики приложения */
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    min-height: 100vh;
+}
+
+/* Верхняя навигационная панель интерфейса */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Стили текстового логотипа приложения */
+.logo {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+/* Контейнер навигационного меню */
+.nav-menu {
+    display: flex;
+    gap: 1.5rem;
+}
+
+/* Ссылки навигации с плавной анимацией изменения цвета */
+.nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+/* Индикация наведения курсора и активного пункта меню */
+.nav-link:hover,
+.nav-link.active {
+    color: var(--color-accent);
+}
+
+/* Главная рабочая область контента с адаптивным центрированием */
+.app-content {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+    min-height: calc(100vh - 65px);
+}
+
+/* Базовый контейнер для изолированных экранов и компонентов SPA */
+.view-card {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+}
+
+/* Типографика заголовков представлений */
+.view-card h1,
+.view-card h2 {
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+    font-size: 1.5rem;
+}
+
+/* Вторичный текст описаний и параграфов */
+.view-card p {
+    color: var(--text-secondary);
+    font-size: 1rem;
+}

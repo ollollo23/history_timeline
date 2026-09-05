@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <!-- Базовая кодировка документа -->
+    <meta charset="UTF-8">
+
+    <!-- Настройка отзывчивого отображения на мобильных и десктопных экранах -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Заголовок веб-приложения -->
+    <title>History Timeline</title>
+
+    <!-- Основная таблица каскадных стилей приложения -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Верхняя фиксированная панель навигации и брендинга -->
+    <header class="app-header">
+        <!-- Логотип платформы с поддержкой SPA-навигации -->
+        <a href="/" data-link class="logo">History Timeline</a>
+
+        <!-- Основной блок навигационных маршрутов -->
+        <nav class="nav-menu">
+            <a href="/" data-link class="nav-link active">Таймлайн</a>
+            <a href="/events/new" data-link class="nav-link">Добавить событие</a>
+            <a href="/admin" data-link class="nav-link">Модерация</a>
+        </nav>
+    </header>
+
+    <!-- Точка динамического монтирования представлений клиентского роутера -->
+    <main id="app-root" class="app-content"></main>
+
+    <!-- Точка входа клиентской логики на базе ES6-модулей -->
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

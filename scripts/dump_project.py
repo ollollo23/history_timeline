@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-# запуск (python scripts/dump_project.py)
+# Команда запуска из корневой директории проекта: python scripts/dump_project.py
 
 # Список исключаемых директорий (виртуальные окружения, кэш, служебные папки)
 IGNORED_DIRS: set[str] = {
@@ -20,7 +20,6 @@ IGNORED_DIRS: set[str] = {
     "dist",
     "build",
     "coverage",
-    ".ruff_cache",
 }
 
 # Расширения бинарных файлов, баз данных, логов и медиа, исключаемые из выгрузки
@@ -41,7 +40,6 @@ IGNORED_EXTENSIONS: set[str] = {
     ".ico",
     ".svg",
     ".ts",
-    ".js",
     ".mjs",
     ".cjs",
     ".map",
@@ -50,8 +48,11 @@ IGNORED_EXTENSIONS: set[str] = {
     ".d.ts",
 }
 
-# Имена файлов, исключаемые из выгрузки
+# Имена файлов, исключаемые из выгрузки (включая секреты и файлы окружения)
 IGNORED_FILENAMES: set[str] = {
+    ".env",
+    ".env.local",
+    ".env.production",
     "project_context.txt",
     "package.json",
     "package-lock.json",
@@ -60,7 +61,6 @@ IGNORED_FILENAMES: set[str] = {
     "yarn.lock",
     "bun.lock",
     "agent-manager.json",
-    "History_Project_info.pdf"
 }
 
 # Маппинг расширений файлов к языкам разметки Markdown для подсветки синтаксиса
@@ -82,11 +82,27 @@ LANGUAGE_MAPPING: dict[str, str] = {
 
 
 def should_ignore_file(file_path: Path) -> bool:
-    """Определяет, должен ли файл быть исключен из обработки."""
+    """
+    Определяет, должен ли файл быть исключен из обработки.
+    Приоритетно блокирует файлы конфигурации окружения и секреты.
+    """
+
+    # Явное разрешение обработки эталонного файла конфигурации переменных окружения
+    if file_path.name == ".env.example":
+        return False
+
+    # Первоочередная проверка префикса имени файла для предотвращения утечки любых .env конфигураций
+    if file_path.name.startswith(".env"):
+        return True
+
+    # Проверка на точное совпадение с черным списком служебных файлов
     if file_path.name in IGNORED_FILENAMES:
         return True
+
+    # Проверка суффикса (расширения) файла на вхождение в список игнорируемых форматов
     if file_path.suffix.lower() in IGNORED_EXTENSIONS:
         return True
+
     return False
 
 
@@ -108,7 +124,7 @@ def generate_ascii_tree(current_dir: Path, prefix: str = "") -> list[str]:
     except PermissionError:
         return tree_lines
 
-    # Фильтрация объектов дерева
+    # Фильтрация объектов дерева на основе правил игнорирования
     valid_entries: list[Path] = []
     for entry in entries:
         if entry.is_dir() and entry.name in IGNORED_DIRS:

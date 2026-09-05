@@ -1,21 +1,35 @@
 # Среда разработки и виртуальные окружения
 .venv/
-.kilo
+.kilo/
 env/
 venv/
 
+# Конфиденциальные данные и переменные окружения
+.env
+.env.*
+!.env.example
 
-# Байт-код и кэш Python
+# Байт-код, кэш и артефакты статического анализа
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.ruff_cache/
+
+# Отчеты тестирования и покрытия кода
+.coverage
+htmlcov/
+
+# Артефакты сборки и метаданные пакетов
+*.egg-info/
+dist/
+build/
 
 # Базы данных и миграции
 *.sqlite3
-
 
 # Системные файлы, дампы и IDE
 .idea/
 .vscode/
 .DS_Store
+project_context.txt

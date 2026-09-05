@@ -1,0 +1,248 @@
+"""
+Сервисный слой управления сущностями исторических событий платформы History Timeline.
+Реализует бизнес-логику, валидацию иерархических связей и проверку хронологических диапазонов.
+Изолирован от веб-транспорта (FastAPI) и не управляет транзакционными границами.
+"""
+
+from collections.abc import Sequence
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.enums import EventRank, EventStatus
+from app.core.exceptions import (
+    EventNotFoundError,
+    InvalidDateRangeError,
+    InvalidParentRankError,
+)
+from app.crud.event import (
+    create_event as crud_create_event,
+)
+from app.crud.event import (
+    delete_event as crud_delete_event,
+)
+from app.crud.event import (
+    get_event_by_id as crud_get_event_by_id,
+)
+from app.crud.event import (
+    get_events as crud_get_events,
+)
+from app.crud.event import (
+    get_events_in_range as crud_get_events_in_range,
+)
+from app.crud.event import (
+    update_event as crud_update_event,
+)
+from app.models.event import Event
+from app.schemas.event import EventCreate, EventUpdate
+
+
+async def create_event(
+    session: AsyncSession,
+    event_in: EventCreate,
+) -> Event:
+    """
+    Создание нового исторического события с валидацией иерархии предков.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param event_in: Валидированные входные данные создания события.
+    :return: Созданный экземпляр ORM-модели Event.
+    :raises EventNotFoundError: Если указанный parent_id не найден в базе данных.
+    :raises InvalidParentRankError: Если ранг родительского события не строго крупнее дочернего.
+    """
+    # Проверка наличия и иерархической корректности родительского события
+    if event_in.parent_id is not None:
+        parent = await crud_get_event_by_id(session, event_in.parent_id)
+        if parent is None:
+            raise EventNotFoundError(event_in.parent_id)
+
+        # Проверка отношения масштабов: ранг родителя должен быть строго крупнее (меньший depth_level)
+        parent_rank = EventRank(parent.rank)
+        if parent_rank.depth_level() >= event_in.rank.depth_level():
+            raise InvalidParentRankError(
+                f"Ранг родительского события '{parent_rank.value}' должен быть строго "
+                f"крупнее ранга дочернего события '{event_in.rank.value}'."
+            )
+
+    # Делегирование создания сущности в слой CRUD
+    created_event = await crud_create_event(session, event_in=event_in)
+
+    # Гарантированная установка начального статуса модерации на сервере
+    created_event.status = EventStatus.PENDING.value
+
+    return created_event
+
+
+async def get_event(
+    session: AsyncSession,
+    event_id: int,
+) -> Event:
+    """
+    Получение исторического события по его первичному ключу.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param event_id: Уникальный идентификатор исторического события.
+    :return: Экземпляр ORM-модели Event.
+    :raises EventNotFoundError: Если событие с указанным ID отсутствует в базе данных.
+    """
+    event = await crud_get_event_by_id(session, event_id)
+    if event is None:
+        raise EventNotFoundError(event_id)
+    return event
+
+
+async def list_events(
+    session: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+) -> Sequence[Event]:
+    """
+    Постраничное получение списка исторических событий.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param skip: Количество пропускаемых записей выборки.
+    :param limit: Максимальное количество возвращаемых записей.
+    :return: Последовательность экземпляров Event.
+    """
+    return await crud_get_events(session, skip=skip, limit=limit)
+
+
+async def list_events_in_range(
+    session: AsyncSession,
+    from_date: int,
+    to_date: int,
+    categories: list[str] | None = None,
+    status: str | None = None,
+    skip: int = 0,
+    limit: int = 500,
+) -> Sequence[Event]:
+    """
+    Выборка событий в заданном временном диапазоне с валидацией границ.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param from_date: Начальная временная метка диапазона (в секундах).
+    :param to_date: Конечная временная метка диапазона (в секундах).
+    :param categories: Список категорий для фильтрации.
+    :param status: Статус модерации события.
+    :param skip: Смещение пагинации.
+    :param limit: Лимит выборки событий.
+    :return: Последовательность найденных событий.
+    :raises InvalidDateRangeError: Если to_date меньше from_date.
+    """
+    # Доменная валидация корректности запрошенного временного интервала
+    if to_date < from_date:
+        raise InvalidDateRangeError(
+            "Конечная дата диапазона (to_date) не может быть меньше начальной даты (from_date)."
+        )
+
+    return await crud_get_events_in_range(
+        session,
+        from_date=from_date,
+        to_date=to_date,
+        categories=categories,
+        status=status,
+        skip=skip,
+        limit=limit,
+    )
+
+
+async def update_event(
+    session: AsyncSession,
+    event_id: int,
+    event_in: EventUpdate,
+) -> Event:
+    """
+    Частичное обновление параметров события с валидацией хронологии и дерева связей.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param event_id: Идентификатор обновляемого события.
+    :param event_in: Схема с перечнем модифицируемых полей.
+    :return: Обновленный экземпляр Event.
+    :raises EventNotFoundError: Если обновляемое событие или новый родитель не найдены.
+    :raises InvalidDateRangeError: Если новая дата окончания меньше даты начала.
+    :raises InvalidParentRankError: Если нарушена иерархия рангов или событие ссылается на себя.
+    """
+    # Получение текущего состояния сущности из базы данных
+    db_event = await crud_get_event_by_id(session, event_id)
+    if db_event is None:
+        raise EventNotFoundError(event_id)
+
+    # 1. Валидация соотношения дат с учетом текущих значений в базе данных
+    target_start_date = (
+        event_in.start_date
+        if ("start_date" in event_in.model_fields_set and event_in.start_date is not None)
+        else db_event.start_date
+    )
+    target_end_date = (
+        event_in.end_date if "end_date" in event_in.model_fields_set else db_event.end_date
+    )
+
+    if target_end_date is not None and target_end_date < target_start_date:
+        raise InvalidDateRangeError("Дата окончания события не может быть меньше даты начала.")
+
+    # 2. Валидация иерархии детализации и родительской сущности
+    target_rank = (
+        event_in.rank
+        if ("rank" in event_in.model_fields_set and event_in.rank is not None)
+        else EventRank(db_event.rank)
+    )
+
+    # Случай А: клиент явно передает parent_id на обновление
+    if "parent_id" in event_in.model_fields_set:
+        if event_in.parent_id is not None:
+            # Защита от создания циклических ссылок на самого себя
+            if event_in.parent_id == event_id:
+                raise InvalidParentRankError(
+                    "Событие не может быть родительским по отношению к самому себе."
+                )
+
+            parent = await crud_get_event_by_id(session, event_in.parent_id)
+            if parent is None:
+                raise EventNotFoundError(event_in.parent_id)
+
+            # Проверка, что ранг родителя строго крупнее целевого ранга события
+            if EventRank(parent.rank).depth_level() >= target_rank.depth_level():
+                raise InvalidParentRankError(
+                    f"Ранг родительского события '{parent.rank}' должен быть строго "
+                    f"крупнее ранга обновляемого события '{target_rank.value}'."
+                )
+
+    # Случай Б: parent_id не изменяется, но изменяется ранг при существующем родителе
+    elif "rank" in event_in.model_fields_set and db_event.parent_id is not None:
+        parent = await crud_get_event_by_id(session, db_event.parent_id)
+        if parent and EventRank(parent.rank).depth_level() >= target_rank.depth_level():
+            raise InvalidParentRankError(
+                f"Новый ранг события '{target_rank.value}' не может быть равен "
+                f"или крупнее ранга существующего родителя '{parent.rank}'."
+            )
+
+    # Передача проверенных изменений в слой базы данных
+    return await crud_update_event(session, db_event=db_event, event_in=event_in)
+
+
+async def delete_event(
+    session: AsyncSession,
+    event_id: int,
+) -> None:
+    """
+    Удаление исторического события по его идентификатору.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param event_id: Уникальный идентификатор удаляемого события.
+    :raises EventNotFoundError: Если событие с указанным ID не найдено.
+    """
+    db_event = await crud_get_event_by_id(session, event_id)
+    if db_event is None:
+        raise EventNotFoundError(event_id)
+
+    await crud_delete_event(session, db_event=db_event)
+
+
+# Явное декларирование публичного интерфейса сервисного слоя
+__all__: list[str] = [
+    "create_event",
+    "delete_event",
+    "get_event",
+    "list_events",
+    "list_events_in_range",
+    "update_event",
+]

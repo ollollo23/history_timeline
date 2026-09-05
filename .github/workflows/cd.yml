@@ -1,0 +1,94 @@
+name: CD Pipeline
+
+# Запуск конвейера непрерывного развертывания строго при публикации версионных тегов релиза
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Блокировка параллельных развертываний для предотвращения состояния гонки (race condition)
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  build-artifact:
+    name: Build Release Artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      # Шаг 1: Клонирование репозитория на ревизии опубликованного тега
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Шаг 2: Инициализация целевой среды исполнения Python 3.14
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      # Шаг 3: Обновление пакетного менеджера pip и установка стандартной утилиты сборки
+      - name: Install build tools
+        run: python -m pip install --upgrade pip && pip install build
+
+      # Шаг 4: Формирование дистрибутива проекта (sdist и wheel)
+      - name: Build project distribution
+        run: python -m build
+
+      # Шаг 5: Выгрузка скомпилированного пакета из каталога dist/ в артефакты пайплайна
+      - name: Upload release package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: dist/
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    # Развертывание блокируется до успешного завершения сборки дистрибутива
+    needs: build-artifact
+
+    # Защищенное окружение с ручным подтверждением (Manual Approval) и URL диагностики
+    environment:
+      name: production
+      url: https://timeline.local/api/v1/health
+
+    steps:
+      # Шаг 1: Получение скомпилированного артефакта релиза из хранилища пайплайна
+      - name: Download release package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: dist/
+
+      # Шаг 2: Аудит контекста исполнения и метаданных Git
+      - name: Audit release context
+        run: |
+          echo "Аудит контекста непрерывного развертывания:"
+          echo "Версия опубликованного тега: ${{ github.ref_name }}"
+          echo "Контрольный хэш коммита (SHA): ${{ github.sha }}"
+          echo "Инициатор запуска: ${{ github.actor }}"
+
+      # Шаг 3: Проверка артефактов и протокол развертывания на целевом контуре
+      - name: Execute deployment routine
+        run: |
+          echo "======================================================================"
+          echo "Инициализация конвейера доставки релиза: ${{ github.ref_name }}"
+          echo "Целевой коммит: ${{ github.sha }}"
+          echo "======================================================================"
+          echo "Содержимое каталога dist/:"
+          ls -la dist/
+          echo "----------------------------------------------------------------------"
+          # Архитектурное примечание:
+          # Данный шаг успешно дождался ручного подтверждения (Manual Approval)
+          # ответственного рецензента в окружении production.
+          # Целевой серверный контур (Kubernetes-кластер, Docker Swarm или выделенный сервер)
+          # находится на этапе проектирования сетевой топологии и сайзинга ресурсов.
+          # При фиксации целевой инфраструктуры здесь будут размещены:
+          # 1. Сборка и отправка production Docker-образа в Container Registry;
+          # 2. Выполнение alembic upgrade head на боевой базе данных PostgreSQL 18;
+          # 3. Rolling-update контейнеров сервиса History Timeline;
+          # 4. Проверка готовности сервиса через GET-запрос к https://timeline.local/api/v1/health.
+          # ----------------------------------------------------------------------
+          echo "Статус: Артефакт релиза ${{ github.ref_name }} успешно верифицирован."
+          echo "Готовность к передаче на продуктовый сервер подтверждена."

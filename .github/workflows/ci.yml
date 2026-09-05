@@ -1,34 +1,113 @@
 name: CI Pipeline
 
-# Настройка триггеров автоматического запуска при пуше в ветки и открытии Pull Request
+# Настройка триггеров запуска конвейера при фиксации изменений и открытии Pull Request
 on: [push, pull_request]
 
 jobs:
-  tests:
-    name: Run Linting and Tests
+  lint:
+    name: Code Quality and Security Linting
     runs-on: ubuntu-latest
 
     steps:
-      # Шаг 1: Клонирование репозитория в рабочую директорию виртуальной машины
+      # Шаг 1: Глубокое клонирование репозитория со всей историей коммитов для аудита утечек
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # Шаг 2: Установка целевой версии интерпретатора Python 3.14
+      # Шаг 2: Аудит кодовой базы и истории коммитов на наличие утекших токенов и паролей
+      - name: Scan secrets with Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Шаг 3: Настройка интерпретатора Python 3.14 с кэшированием каталога pip
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+          cache: "pip"
 
-      # Шаг 3: Обновление пакетного менеджера pip и установка зависимостей проекта
-      - name: Install dependencies
+      # Шаг 4: Обновление пакетного менеджера и установка dev-зависимостей проекта
+      - name: Install dev dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
-      # Шаг 4: Запуск статического анализатора кода для проверки стандартов форматирования и чистоты
+      # Шаг 5: Статический анализ кодовой базы на архитектурные правила и потенциальные баги
       - name: Run linter
         run: ruff check .
 
-      # Шаг 5: Исполнение набора асинхронных интеграционных и модульных тестов
-      - name: Run tests
+      # Шаг 6: Проверка соответствия стандартам форматирования без изменения файлов
+      - name: Check code formatting
+        run: ruff format --check .
+
+  test:
+    name: Migrations, Test Suite and Coverage
+    runs-on: ubuntu-latest
+    # Запуск тестового контура только после успешного прохождения проверок качества и безопасности
+    needs: lint
+
+    # Сервисный контейнер с изолированной СУБД PostgreSQL 18 для интеграционных тестов
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ secrets.DB_PASS || 'postgres_ci_fallback_password' }}
+          POSTGRES_DB: timeline_test_db
+        ports:
+          - 5432:5432
+        # Контроль доступности сокета базы данных перед началом исполнения шагов
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Системные переменные окружения для конфигурации подключения приложения к базе данных
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASS: ${{ secrets.DB_PASS || 'postgres_ci_fallback_password' }}
+      DB_PASSWORD: ${{ secrets.DB_PASS || 'postgres_ci_fallback_password' }}
+      DB_NAME: timeline_test_db
+      TEST_DB_NAME: timeline_test_db
+      APP_ENV: ci
+      DEBUG: "False"
+
+    steps:
+      # Шаг 1: Клонирование исходного кода проекта
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Шаг 2: Диагностика доступности секрета без раскрытия его фактического содержимого
+      - name: Check secret availability
+        run: |
+          if [ -n "${{ secrets.DB_PASS }}" ]; then
+            echo "Секрет DB_PASS успешно загружен из настроек репозитория"
+          else
+            echo "Предупреждение: секрет DB_PASS не задан, активирован резервный пароль CI"
+          fi
+
+      # Шаг 3: Настройка целевого рантайма Python 3.14 с активацией кэша зависимостей
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      # Шаг 4: Установка всех продуктовых и dev-пакетов проекта
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # Шаг 5: Применение актуальной схемы базы данных через миграции Alembic
+      - name: Run database migrations
+        run: alembic upgrade head
+
+      # Шаг 6: Исполнение набора тестов с формированием отчетов и контролем порога покрытия
+      - name: Run test suite with coverage
         run: pytest

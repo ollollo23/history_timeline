@@ -1,16 +1,19 @@
-import re
-from sqlalchemy.orm import DeclarativeBase, declared_attr
+"""
+Базовый декларативный класс для всех ORM-моделей проекта History Timeline.
+Использует стандарт DeclarativeBase SQLAlchemy 2.0.
+"""
+
+from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
     """
     Базовый декларативный класс для всех ORM-моделей проекта.
-    Автоматически формирует имя таблицы на основе имени Python-класса.
+
+    Каждая дочерняя модель обязана явно определять атрибут __tablename__,
+    что исключает ошибки автоматической плюрализации (например,
+    event_categorys вместо event_categories) и обеспечивает явный контракт
+    с реляционной схемой базы данных.
     """
 
-    @declared_attr.directive
-    def __tablename__(cls) -> str:
-        # Преобразование имени класса из CamelCase в snake_case с помощью регулярного выражения
-        snake_case_name = re.sub(r"(?<!^)(?=[A-Z])", "_", cls.__name__).lower()
-        # Добавление суффикса 's' для формирования названия таблицы во множественном числе
-        return f"{snake_case_name}s"
+    pass
