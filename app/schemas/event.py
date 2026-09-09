@@ -87,7 +87,7 @@ class EventCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
-    def validate_date_boundaries_and_order(self) -> "EventCreate":
+    def validate_date_boundaries_and_order(self) -> EventCreate:
         """
         Проверяет хронологическую корректность дат:
         - Вхождение start_date и end_date в глобальные границы шкалы платформы;
@@ -119,6 +119,7 @@ class EventUpdate(BaseModel):
     """
     Схема валидации для частичного обновления (PATCH) исторического события.
     Все поля опциональны, однако передача null в обязательные поля запрещена.
+    Исключает поле статуса модерации (недоступно для публичного изменения).
     """
 
     # Список полей таблицы, для которых запрещена установка значения null в базе данных
@@ -128,7 +129,6 @@ class EventUpdate(BaseModel):
         "category",
         "rank",
         "calendar_system",
-        "status",
     }
 
     # Опциональное обновление заголовка
@@ -193,17 +193,11 @@ class EventUpdate(BaseModel):
         description="Медиа-вложения",
     )
 
-    # Опциональное обновление статуса модерации (доступно администратору/модератору)
-    status: EventStatus | None = Field(
-        default=None,
-        description="Статус модерации события",
-    )
-
     # Запрет передачи неизвестных полей при обновлении
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
-    def validate_patch_rules(self) -> "EventUpdate":
+    def validate_patch_rules(self) -> EventUpdate:
         """
         Проверяет бизнес-правила частичного обновления:
         - Защиту от установки null в колонки со строгим ограничением NOT NULL;
@@ -286,10 +280,14 @@ class EventResponse(BaseModel):
         description="Метка окончания в секундах Unix",
     )
 
-    # Категория события
-    category: EventCategory = Field(
+    # Тематическая категория события (поддерживает пользовательские категории)
+    category: str = Field(
         ...,
-        description="Категория события",
+        max_length=50,
+        description=(
+            "Тематическая категория события. Значение переносится из колонки "
+            "events.category без ограничения перечислением для поддержки пользовательских категорий."
+        ),
     )
 
     # Ранг детализации временной шкалы

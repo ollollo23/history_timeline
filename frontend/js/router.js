@@ -62,8 +62,9 @@ export async function router() {
             if (apiStatus) {
                 try {
                     // Асинхронный запрос к эндпоинту мониторинга состояния
-                    await fetchHealth();
-                    apiStatus.textContent = 'Статус API: подключено (v1.0.0)';
+                    const healthData = await fetchHealth();
+                    // Динамическая подстановка полученной с сервера версии API
+                    apiStatus.textContent = `Статус API: подключено (v${healthData.version || '1.0.0'})`;
                     apiStatus.style.color = '#10b981';
                 } catch (healthError) {
                     // Обработка отсутствия соединения с сервером
@@ -79,18 +80,23 @@ export async function router() {
         // Поиск корневого контейнера для вывода визуального сообщения об ошибке
         const appRoot = document.getElementById('app-root');
         if (appRoot) {
+            // Монтирование статического HTML-каркаса карточки ошибки без небезопасной интерполяции
             appRoot.innerHTML = `
                 <section class="view-card" style="border-color: #ef4444;">
                     <h1 style="color: #ef4444;">Ошибка отображения страницы</h1>
                     <p>Произошел сбой при монтировании представления интерфейса.</p>
-                    <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-accent); border-radius: 6px; font-family: monospace; font-size: 0.9rem; color: #f87171;">
-                        ${error.message || 'Неизвестная ошибка'}
-                    </div>
+                    <div id="router-error-details" style="margin-top: 1rem; padding: 1rem; background: var(--bg-accent); border-radius: 6px; font-family: monospace; font-size: 0.9rem; color: #f87171; word-break: break-word;"></div>
                     <div style="margin-top: 1.5rem;">
                         <a href="/" data-link class="nav-link" style="color: var(--color-accent); text-decoration: underline;">Вернуться на главную страницу</a>
                     </div>
                 </section>
             `;
+
+            // Безопасная запись текста ошибки через textContent для экранирования HTML/XSS
+            const errorDetails = document.getElementById('router-error-details');
+            if (errorDetails) {
+                errorDetails.textContent = error.message || 'Неизвестная ошибка';
+            }
         }
     }
 }

@@ -1,14 +1,14 @@
 """
 Контроллер системной диагностики и мониторинга состояния сервиса History Timeline.
-Проверяет сетевую доступность СУБД PostgreSQL и возвращает стандартизированный статус.
+Проверяет сетевую доступность СУБД PostgreSQL через изолированное подключение и возвращает стандартизированный статус.
 """
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config.config import settings
-from app.core.database.database import get_db
+from app.core.database.database import get_db_engine
 from app.core.logger import logger
 from app.schemas.health import HealthResponse
 
@@ -33,23 +33,28 @@ router = APIRouter(prefix="", tags=["System"])
 )
 async def health_check(
     response: Response,
-    session: AsyncSession = Depends(get_db),
+    engine: AsyncEngine = Depends(get_db_engine),
 ) -> HealthResponse:
     """
     Диагностический эндпоинт проверки работоспособности сервиса.
 
-    Логика разделения HTTP-статусов:
-    - 200 OK: тестовый запрос SELECT 1 успешно выполнен, пул соединений к PostgreSQL активен,
-      возвращается статус 'ok' и флаг db_connected=True.
-    - 503 Service Unavailable: обнаружен сбой сетевого сокета или СУБД недоступна,
-      код ответа мутируется через объект Response на 503, возвращается статус 'degraded'
-      и db_connected=False без раскрытия технического трейсбека клиенту.
+    Жизненный цикл подключения и изоляция сетевых сбоев:
+    - Зависимость get_db_engine возвращает объект AsyncEngine без выполнения сетевых вызовов
+      на этапе сборки зависимостей FastAPI, предотвращая падение с кодом 500 до входа в обработчик.
+    - Открытие сетевого сокета (engine.connect()) и выполнение контрольного запроса (SELECT 1)
+      выполняются внутри защищенного блока try...except.
+    - При штатной работе возвращается код 200 OK, status='ok' и db_connected=True.
+    - При любом сетевом или инфраструктурном сбое (отказ сокета, недоступность СУБД) ошибка
+      логируется на уровне ERROR с полным стеком exc_info=True, код ответа устанавливается
+      в 503 Service Unavailable, и возвращается структурированная схема деградации без раскрытия
+      системных деталей клиенту.
     """
     try:
-        # Выполнение легковесного контрольного запроса для валидации сессии базы данных
-        await session.execute(text("SELECT 1"))
+        # Открытие сетевого соединения и выполнение контрольного запроса внутри изолированного блока
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
 
-        # Возврат успешного статуса при штатной работе всех компонентов
+        # Возврат успешного статуса при подтвержденной доступности базы данных
         return HealthResponse(
             status="ok",
             db_connected=True,

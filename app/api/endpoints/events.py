@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.database import get_db
+from app.core.enums import EventCategory, EventStatus
 from app.models.event import Event
 from app.schemas.event import EventCreate, EventResponse, EventUpdate
 from app.services.event_service import (
@@ -83,13 +84,9 @@ async def read_events_in_range(
         ...,
         description="Конечная временная метка диапазона (BIGINT)",
     ),
-    categories: list[str] | None = Query(
+    categories: list[EventCategory] | None = Query(
         default=None,
         description="Список категорий для фильтрации",
-    ),
-    status: str | None = Query(
-        default="approved",
-        description="Фильтр по статусу модерации (по умолчанию 'approved')",
     ),
     skip: int = Query(
         default=0,
@@ -106,14 +103,18 @@ async def read_events_in_range(
 ) -> Sequence[Event]:
     """
     Выборка исторических событий, пересекающих заданный хронологический интервал.
-    Поддерживает фильтрацию по набору категорий и статусу модерации контента.
+    Публичная лента таймлайна возвращает исключительно одобренный контент (status='approved').
+    Фильтрация по статусам и модераторские выборки будут реализованы на шаге 5 в рамках ролевой модели.
     """
+    # Преобразование перечислений EventCategory в список строковых примитивов для слоя данных
+    raw_categories = [category.value for category in categories] if categories else None
+
     return await list_events_in_range(
         session=session,
         from_date=from_date,
         to_date=to_date,
-        categories=categories,
-        status=status,
+        categories=raw_categories,
+        status=EventStatus.APPROVED.value,
         skip=skip,
         limit=limit,
     )

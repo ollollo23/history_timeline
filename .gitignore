@@ -24,6 +24,7 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+project_info/pytest_last_run.txt
 
 # Базы данных и миграции
 *.sqlite3

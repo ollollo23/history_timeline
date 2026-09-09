@@ -21,7 +21,6 @@ from app.core.config.python_spec import verify_python_environment
 from app.core.database.database import engine
 from app.core.exceptions import (
     DomainError,
-    DuplicateEventError,
     EventNotFoundError,
     InvalidDateRangeError,
     InvalidParentRankError,
@@ -56,10 +55,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 # Инициализация основного экземпляра приложения FastAPI
+# debug=False принудительно отключает ServerErrorMiddleware для защиты от утечки трассировок
 app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
     lifespan=lifespan,
+    debug=False,
 )
 
 
@@ -95,15 +96,6 @@ async def invalid_parent_rank_handler(
     )
 
 
-@app.exception_handler(DuplicateEventError)
-async def duplicate_event_handler(request: Request, exc: DuplicateEventError) -> JSONResponse:
-    """Обработка конфликтов уникальности доменных сущностей (409 Conflict)."""
-    return JSONResponse(
-        status_code=status.HTTP_409_CONFLICT,
-        content={"detail": exc.message},
-    )
-
-
 @app.exception_handler(DomainError)
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """
@@ -119,19 +111,27 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
 
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
-    """Обработка аппаратных ограничений целостности базы данных (409 Conflict)."""
-    logger.warning("Конфликт целостности данных СУБД: %s", exc)
+    """
+    Обработка аппаратных ограничений целостности базы данных (409 Conflict).
+    Логирование уровня ERROR с трассировкой стека (exc_info=True) фиксирует
+    точное имя нарушенного ограничения CheckConstraint, внешнего ключа или уникальности,
+    предотвращая потерю диагностического контекста в тестах и CI/CD при сокрытии деталей от клиента.
+    """
+    # Логирование полной информации об исключении базы данных на уровне ERROR со стеком вызовов
+    logger.error("Конфликт целостности данных СУБД (IntegrityError): %s", exc, exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
         content={"detail": "Нарушение ограничений целостности данных базы данных."},
     )
 
 
+@app.exception_handler(status.HTTP_500_INTERNAL_SERVER_ERROR)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Глобальный перехватчик непредвиденных системных исключений (500 Internal Server Error).
-    Логирует полный стек вызовов и предотвращает утечку внутренней информации клиенту.
+    Зарегистрирован как на статус 500, так и на базовый класс Exception.
+    Логирует полный стек вызовов и предотвращает утечку внутренней технической информации клиенту.
     """
     logger.error(
         "Необработанное исключение при обработке запроса: %s",
@@ -155,6 +155,13 @@ async def validate_request_body_size(
     """
     Middleware валидации предельного размера тела HTTP-запроса для защиты от атак типа DoS.
     Отклоняет запросы, превышающие settings.max_request_body_bytes, до начала вычитывания сокета.
+
+    Известное ограничение:
+    При передаче полезной нагрузки с заголовком Transfer-Encoding: chunked заголовок
+    Content-Length в HTTP-запросе отсутствует, в связи с чем предварительная проверка
+    размера тела не применяется. Полноценная защита от DoS-атак с потоковой передачей
+    требует итеративного подсчета прочитанных байтов на уровне ASGI-конвейера и вынесена
+    в спринт оптимизации инфраструктуры.
     """
     content_length = request.headers.get("content-length")
     if (
@@ -163,7 +170,7 @@ async def validate_request_body_size(
         and int(content_length) > settings.max_request_body_bytes
     ):
         return JSONResponse(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             content={"detail": "Размер тела запроса превышает допустимый лимит."},
         )
     return await call_next(request)
@@ -209,19 +216,25 @@ if FRONTEND_DIR.exists():
 async def serve_spa(full_path: str, request: Request) -> Response:
     """
     Перехватчик клиентских путей для поддержки HTML5 History API (SPA-роутер).
-    Изолирует маршруты API и служебные пути от ложной отдачи каркаса интерфейса.
+    Изолирует системные эндпоинты API и служебные пути по первому сегменту URL,
+    предотвращая ложную отдачу HTML-каркаса интерфейса вместо статуса 404 JSON.
     """
+    # Нормализация входящего пути со снятием краевых слешей
     normalized_path = full_path.strip("/")
+    # Разделение пути на составляющие сегменты
+    segments = normalized_path.split("/") if normalized_path else []
+    # Извлечение первого сегмента для точного соответствия
+    first_segment = segments[0].lower() if segments else ""
 
-    # Предотвращение отдачи HTML при обращении к несуществующим эндпоинтам API
-    if normalized_path.startswith("api") or normalized_path == "api":
+    # Изоляция несуществующих маршрутов API: возвращает JSON 404
+    if first_segment == "api":
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": "Эндпоинт API не найден."},
         )
 
-    # Предотвращение ложного срабатывания SPA для документации и статических ресурсов
-    if normalized_path.startswith(("static", "docs", "redoc", "openapi.json")):
+    # Изоляция служебных маршрутов документации и статических ресурсов: возвращает JSON 404
+    if first_segment in {"static", "docs", "redoc", "openapi.json"}:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": "Запрашиваемый ресурс не найден."},
@@ -232,6 +245,7 @@ async def serve_spa(full_path: str, request: Request) -> Response:
     if index_file.exists():
         return FileResponse(index_file)
 
+    # Запасной ответ при отсутствии собранного фронтенда
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={"message": "Frontend is under construction"},

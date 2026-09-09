@@ -1,17 +1,20 @@
 """
 Модульные тесты HTTP-эндпоинтов управления событиями /api/v1/events.
-Проверяет маршрутизацию, HTTP-статусы, валидацию Pydantic v2 и доменные исключения
-с использованием фикстуры mock_db_session без подключения к базе данных.
+Проверяет маршрутизацию, HTTP-статусы, валидацию Pydantic v2, защитные middleware
+и централизованную обработку доменных и системных исключений.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import status
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
+from app.core.config.config import settings
 from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
+from app.core.exceptions import DomainError
+from app.main import app
 from app.models.event import Event
 
 
@@ -125,25 +128,40 @@ async def test_create_event_validation_error(
 @pytest.mark.unit
 async def test_get_events_list_pagination(
     async_client: AsyncClient,
-    mock_db_session: AsyncMock,
 ) -> None:
     """
     Проверка постраничной выборки событий через GET /api/v1/events/.
-    Валидирует статус 200 OK, длину результирующего массива и вызов сессии.
+    Верифицирует соблюдение политики публичной видимости (status='approved'),
+    корректную передачу смещения skip и лимита limit в слой данных crud_get_events
+    и возврат HTTP 200 OK со списком сущностей.
     """
-    mock_event = build_mock_event(id=10, title="Пагинированное событие")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [mock_event]
-    mock_db_session.execute.return_value = mock_result
+    # Изоляция слоя доступа к данным для верификации контракта сервисного вызова
+    with patch(
+        "app.services.event_service.crud_get_events",
+        new_callable=AsyncMock,
+    ) as mock_crud_get_events:
+        mock_event = build_mock_event(
+            id=10,
+            title="Пагинированное событие",
+            status=EventStatus.APPROVED.value,
+        )
+        mock_crud_get_events.return_value = [mock_event]
 
-    response = await async_client.get("/api/v1/events/?skip=10&limit=25")
+        # Выполнение GET-запроса с параметрами пагинации
+        response = await async_client.get("/api/v1/events/?skip=10&limit=25")
 
-    assert response.status_code == status.HTTP_200_OK
-    data = response.json()
-    assert isinstance(data, list)
-    assert len(data) == 1
-    assert data[0]["id"] == 10
-    assert mock_db_session.execute.called
+        # Проверка успешного HTTP-статуса и структуры полученных данных
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["id"] == 10
+
+        # Верификация соблюдения политики публичной видимости и передачи параметров
+        mock_crud_get_events.assert_awaited_once()
+        assert mock_crud_get_events.call_args.kwargs.get("status") == EventStatus.APPROVED.value
+        assert mock_crud_get_events.call_args.kwargs.get("skip") == 10
+        assert mock_crud_get_events.call_args.kwargs.get("limit") == 25
 
 
 @pytest.mark.unit
@@ -186,6 +204,43 @@ async def test_get_events_in_range_invalid_bounds(
         data["detail"]
         == "Конечная дата диапазона (to_date) не может быть меньше начальной даты (from_date)."
     )
+
+
+@pytest.mark.unit
+async def test_get_events_in_range_invalid_category(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка валидации категорий в запросе выборки по диапазону.
+    Передача неизвестного значения категории приводит к возврату 422 Unprocessable Content.
+    """
+    response = await async_client.get(
+        "/api/v1/events/range?from_date=0&to_date=1000&categories=religion"
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@pytest.mark.unit
+async def test_get_events_in_range_ignores_status_query_param(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка игнорирования клиентского параметра status в маршруте GET /range.
+    Публичная лента принудительно передает в сервисный слой status='approved'.
+    """
+    with patch(
+        "app.api.endpoints.events.list_events_in_range",
+        new_callable=AsyncMock,
+    ) as mock_list_events:
+        mock_list_events.return_value = []
+
+        response = await async_client.get(
+            "/api/v1/events/range?from_date=0&to_date=1000&status=pending"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        mock_list_events.assert_awaited_once()
+        assert mock_list_events.call_args.kwargs.get("status") == EventStatus.APPROVED.value
 
 
 @pytest.mark.unit
@@ -256,6 +311,115 @@ async def test_update_event_clear_end_date_success(
 
 
 @pytest.mark.unit
+async def test_update_event_start_date_later_than_existing_end_date(
+    async_client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """
+    Проверка валидации хронологии при неявном конфликте дат: переданный start_date
+    оказывается позже уже сохраненного в базе данных значения end_date.
+    Ожидается статус 400 Bad Request с доменным сообщением об ошибке.
+    """
+    mock_event = build_mock_event(id=1, start_date=1000, end_date=2000)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_event
+    mock_db_session.execute.return_value = mock_result
+
+    response = await async_client.patch(
+        "/api/v1/events/1",
+        json={"start_date": 3000},
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    data = response.json()
+    assert data["detail"] == "Дата окончания события не может быть меньше даты начала."
+
+
+@pytest.mark.unit
+async def test_update_event_parent_not_found(
+    async_client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """
+    Проверка валидации существования родительского события при частичном обновлении.
+    Попытка привязать событие к несуществующему parent_id возвращает статус 404 Not Found.
+    """
+    mock_event = build_mock_event(id=1)
+    res_event = MagicMock()
+    res_event.scalar_one_or_none.return_value = mock_event
+
+    res_parent = MagicMock()
+    res_parent.scalar_one_or_none.return_value = None
+
+    mock_db_session.execute.side_effect = [res_event, res_parent]
+
+    response = await async_client.patch(
+        "/api/v1/events/1",
+        json={"parent_id": 999},
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    data = response.json()
+    assert "Историческое событие с ID 999 не найдено" in data["detail"]
+
+
+@pytest.mark.unit
+async def test_update_event_parent_rank_invalid(
+    async_client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """
+    Проверка валидации иерархии рангов детализации при назначении нового родителя.
+    Попытка назначить родителем событие с более мелким рангом возвращает статус 400 Bad Request.
+    """
+    mock_event = build_mock_event(id=1, rank=EventRank.CENTURY.value)
+    mock_parent = build_mock_event(id=2, rank=EventRank.YEAR.value)
+
+    res_event = MagicMock()
+    res_event.scalar_one_or_none.return_value = mock_event
+
+    res_parent = MagicMock()
+    res_parent.scalar_one_or_none.return_value = mock_parent
+
+    mock_db_session.execute.side_effect = [res_event, res_parent]
+
+    response = await async_client.patch(
+        "/api/v1/events/1",
+        json={"parent_id": 2},
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    data = response.json()
+    assert "Ранг родительского события" in data["detail"]
+    assert "должен быть строго крупнее" in data["detail"]
+
+
+@pytest.mark.unit
+async def test_update_event_unlink_parent_success(
+    async_client: AsyncClient,
+    mock_db_session: AsyncMock,
+) -> None:
+    """
+    Проверка успешного сброса родительской связи (parent_id: null) через PATCH /api/v1/events/{id}.
+    Валидирует отвязку от иерархии без дополнительных проверок рангов и возврат HTTP 200 OK.
+    """
+    mock_event = build_mock_event(id=1, parent_id=5)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_event
+    mock_db_session.execute.return_value = mock_result
+
+    response = await async_client.patch(
+        "/api/v1/events/1",
+        json={"parent_id": None},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["parent_id"] is None
+    assert mock_db_session.flush.called
+
+
+@pytest.mark.unit
 async def test_update_event_not_found(
     async_client: AsyncClient,
     mock_db_session: AsyncMock,
@@ -279,12 +443,27 @@ async def test_update_event_not_found(
 
 
 @pytest.mark.unit
+async def test_update_event_status_field_forbidden(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка запрета передачи поля status при частичном обновлении (PATCH).
+    Конфигурация extra='forbid' в EventUpdate возвращает статус 422.
+    """
+    response = await async_client.patch(
+        "/api/v1/events/1",
+        json={"status": EventStatus.APPROVED.value},
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "payload",
     [
         {"title": None},
         {"category": None},
-        {"status": None},
+        {"rank": None},
     ],
 )
 async def test_update_event_null_non_nullable_fields(
@@ -353,3 +532,66 @@ async def test_unknown_api_route_not_found_json(
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "application/json" in response.headers.get("content-type", "")
     assert response.json() == {"detail": "Эндпоинт API не найден."}
+
+
+@pytest.mark.unit
+async def test_request_body_size_limit_exceeded(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка middleware ограничения размера входящего HTTP-запроса (413 Content Too Large).
+    При превышении max_request_body_bytes запрос отклоняется до вычитывания сокета.
+    """
+    oversized_size = settings.max_request_body_bytes + 100
+    oversized_payload = "x" * oversized_size
+
+    response = await async_client.post(
+        "/api/v1/events/",
+        content=oversized_payload,
+        headers={"content-length": str(oversized_size)},
+    )
+
+    assert response.status_code == status.HTTP_413_CONTENT_TOO_LARGE
+    assert response.json() == {"detail": "Размер тела запроса превышает допустимый лимит."}
+
+
+@pytest.mark.unit
+async def test_domain_error_fallback_handler(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка централизованного перехватчика базового DomainError (400 Bad Request).
+    Любое непрофильное доменное исключение перехватывается с возвратом статуса 400.
+    """
+    with patch(
+        "app.api.endpoints.events.get_event",
+        side_effect=DomainError("Базовая ошибка домена"),
+    ):
+        response = await async_client.get("/api/v1/events/1")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == {"detail": "Базовая ошибка домена"}
+
+
+@pytest.mark.unit
+async def test_unhandled_exception_returns_500_without_traceback(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка глобального перехватчика необработанных системных исключений (500 Internal Server Error).
+    Использует raise_app_exceptions=False в ASGITransport для предотвращения проброса исключения
+    из ServerErrorMiddleware в тестовый раннер и проверки сформированного JSON-ответа.
+    """
+    # Изоляция транспорта для подавления аварийного raise exc со стороны ServerErrorMiddleware
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch(
+            "app.api.endpoints.events.get_event",
+            side_effect=RuntimeError("Непредвиденный сбой ядра"),
+        ):
+            response = await client.get("/api/v1/events/1")
+
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    data = response.json()
+    assert data == {"detail": "Внутренняя ошибка сервера."}
+    assert "Непредвиденный сбой ядра" not in response.text

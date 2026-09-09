@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import TIMELINE_MAX_TIMESTAMP, TIMELINE_MIN_TIMESTAMP
 from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
 from app.models.event import Event
 
@@ -70,6 +71,96 @@ async def test_check_constraint_rank_allowed(db_session: AsyncSession) -> None:
         await db_session.flush()
 
     assert "ck_events_rank_allowed" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_check_constraint_status_allowed(db_session: AsyncSession) -> None:
+    """
+    Проверка аппаратного ограничения ck_events_status_allowed:
+    статус модерации обязан соответствовать одному из допустимых значений EventStatus.
+    """
+    # Создание сущности с недопустимым значением статуса
+    invalid_event = make_base_event(status="unverified")
+    db_session.add(invalid_event)
+
+    # Выполнение flush должно вызвать откат вставки ограничением СУБД
+    with pytest.raises(IntegrityError) as exc_info:
+        await db_session.flush()
+
+    assert "ck_events_status_allowed" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_check_constraint_calendar_allowed(db_session: AsyncSession) -> None:
+    """
+    Проверка аппаратного ограничения ck_events_calendar_allowed:
+    календарная система обязана входить в перечень допустимых CalendarSystem.
+    """
+    # Создание сущности с неподдерживаемой календарной системой
+    invalid_event = make_base_event(calendar_system="mayan")
+    db_session.add(invalid_event)
+
+    with pytest.raises(IntegrityError) as exc_info:
+        await db_session.flush()
+
+    assert "ck_events_calendar_allowed" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_check_constraint_start_date_bounds(db_session: AsyncSession) -> None:
+    """
+    Проверка аппаратного ограничения ck_events_start_date_bounds:
+    метка даты начала обязана находиться в диапазоне [TIMELINE_MIN_TIMESTAMP, TIMELINE_MAX_TIMESTAMP].
+    """
+    # Создание сущности с датой начала ниже глобального предела шкалы платформы
+    invalid_event = make_base_event(start_date=TIMELINE_MIN_TIMESTAMP - 1)
+    db_session.add(invalid_event)
+
+    with pytest.raises(IntegrityError) as exc_info:
+        await db_session.flush()
+
+    assert "ck_events_start_date_bounds" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_check_constraint_end_date_bounds(db_session: AsyncSession) -> None:
+    """
+    Проверка аппаратного ограничения ck_events_end_date_bounds:
+    метка даты окончания не может превышать верхний предел TIMELINE_MAX_TIMESTAMP.
+    """
+    # Создание сущности с датой окончания выше максимальной границы шкалы
+    invalid_event = make_base_event(start_date=1000, end_date=TIMELINE_MAX_TIMESTAMP + 1)
+    db_session.add(invalid_event)
+
+    with pytest.raises(IntegrityError) as exc_info:
+        await db_session.flush()
+
+    assert "ck_events_end_date_bounds" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_check_constraint_media_payload_is_array(
+    db_session: AsyncSession,
+) -> None:
+    """
+    Проверка аппаратного ограничения ck_events_media_payload_is_array:
+    колонка media_payload на уровне PostgreSQL 18 обязана быть JSONB-массивом.
+    """
+    # Создание сущности, где вместо массива передан JSON-объект (словарь)
+    invalid_event = make_base_event(
+        media_payload={"type": "image", "url": "https://example.com/item.png"}
+    )
+    db_session.add(invalid_event)
+
+    with pytest.raises(IntegrityError) as exc_info:
+        await db_session.flush()
+
+    assert "ck_events_media_payload_is_array" in str(exc_info.value)
 
 
 @pytest.mark.integration

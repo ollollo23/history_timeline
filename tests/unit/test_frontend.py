@@ -107,3 +107,51 @@ async def test_router_js_content_integrity(async_client: AsyncClient) -> None:
 
     # Контроль обязательного наличия легитимного пути к представлению создания события
     assert "/views/create_event.js" in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path, expected_status, expected_body_token",
+    [
+        ("/api-guide", status.HTTP_200_OK, 'id="app-root"'),
+        ("/documentation", status.HTTP_200_OK, 'id="app-root"'),
+        (
+            "/api/v1/unknown",
+            status.HTTP_404_NOT_FOUND,
+            "Эндпоинт API не найден.",
+        ),
+        (
+            "/static/missing.js",
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+        ),
+    ],
+)
+async def test_route_segment_isolation_spa_and_service_paths(
+    async_client: AsyncClient,
+    path: str,
+    expected_status: int,
+    expected_body_token: str,
+) -> None:
+    """
+    Параметризованная проверка изоляции сегментов пути клиентского SPA-роутера.
+    Подтверждает отдачу HTML-каркаса для клиентских маршрутов со служебными
+    подстроками в названии (/api-guide, /documentation) и возврат JSON 404 для
+    служебных пространств. Смонтированное приложение StaticFiles возвращает
+    стандартное сообщение Starlette 'Not Found', тогда как роутер serve_spa
+    изолирует эндпоинты API с кастомным сообщением 'Эндпоинт API не найден.'.
+    """
+    # Выполнение асинхронного GET-запроса по проверяемому маршруту
+    response = await async_client.get(path)
+
+    # Проверка соответствия статус-кода ожидаемому значению
+    assert response.status_code == expected_status
+
+    # Валидация успешной отдачи клиентского HTML-каркаса
+    if expected_status == status.HTTP_200_OK:
+        assert "text/html" in response.headers["content-type"]
+        assert expected_body_token in response.text
+    # Валидация изолированного возврата ошибки для служебных маршрутов
+    else:
+        assert "application/json" in response.headers.get("content-type", "")
+        assert response.json() == {"detail": expected_body_token}
