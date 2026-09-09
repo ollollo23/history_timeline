@@ -88,7 +88,7 @@ def test_event_create_invalid_date_order() -> None:
 def test_event_create_out_of_bounds() -> None:
     """
     Проверка валидации глобальных физических границ шкалы времени платформы
-    [TIMELINE_MIN_TIMESTAMP, TIMELINE_MAX_TIMESTAMP].
+    [TIMELINE_MIN_TIMESTAMP, TIMELINE_MAX_TIMESTAMP] для поля start_date.
     """
     # 1. Проверка выхода за нижнюю границу (ранее 1 млн лет до н.э.)
     with pytest.raises(ValidationError) as exc_min:
@@ -107,6 +107,30 @@ def test_event_create_out_of_bounds() -> None:
             category=EventCategory.SCIENCE,
         )
     assert "Дата начала события выходит за допустимые границы платформы" in str(exc_max.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_end_date",
+    [
+        TIMELINE_MIN_TIMESTAMP - 1,
+        TIMELINE_MAX_TIMESTAMP + 1,
+    ],
+)
+def test_event_create_end_date_out_of_bounds(invalid_end_date: int) -> None:
+    """
+    Параметризованная проверка валидации выхода даты окончания (end_date)
+    за допустимые физические границы шкалы времени в схеме EventCreate.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        EventCreate(
+            title="Событие с недопустимым end_date",
+            start_date=0,
+            end_date=invalid_end_date,
+            category=EventCategory.SCIENCE,
+        )
+
+    assert "Дата окончания события выходит за допустимые границы платформы" in str(exc_info.value)
 
 
 # --- Тестирование схемы обновления события EventUpdate ---
@@ -143,6 +167,31 @@ def test_event_update_clear_end_date_allowed() -> None:
 
 
 @pytest.mark.unit
+def test_event_update_non_nullable_fields_composition() -> None:
+    """
+    Проверка эталонного состава множества NON_NULLABLE_UPDATE_FIELDS.
+    Гарантирует присутствие ровно пяти обязательных непустых полей
+    и подтверждает отсутствие атрибута status в перечне.
+    """
+    expected_fields = {"title", "start_date", "category", "rank", "calendar_system"}
+    assert EventUpdate.NON_NULLABLE_UPDATE_FIELDS == expected_fields
+
+
+@pytest.mark.unit
+def test_event_update_extra_field_status_forbidden() -> None:
+    """
+    Проверка запрета передачи поля status при частичном обновлении события.
+    Конфигурация extra='forbid' в EventUpdate обязана отклонять поле status ошибкой ValidationError.
+    """
+    payload = {"status": EventStatus.APPROVED.value}
+    with pytest.raises(ValidationError) as exc_info:
+        EventUpdate(**payload)
+
+    error_str = str(exc_info.value)
+    assert "extra_forbidden" in error_str or "status" in error_str
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "field_name",
     sorted(EventUpdate.NON_NULLABLE_UPDATE_FIELDS),
@@ -170,6 +219,44 @@ def test_event_update_invalid_dates_combination() -> None:
         EventUpdate(start_date=2000, end_date=1000)
 
     assert "Дата окончания события не может быть меньше даты начала" in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_start_date",
+    [
+        TIMELINE_MIN_TIMESTAMP - 1,
+        TIMELINE_MAX_TIMESTAMP + 1,
+    ],
+)
+def test_event_update_start_date_out_of_bounds(invalid_start_date: int) -> None:
+    """
+    Параметризованная проверка валидации выхода даты начала (start_date)
+    за допустимые физические границы шкалы времени платформы в схеме EventUpdate.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        EventUpdate(start_date=invalid_start_date)
+
+    assert "Дата начала события выходит за допустимые границы платформы" in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_end_date",
+    [
+        TIMELINE_MIN_TIMESTAMP - 1,
+        TIMELINE_MAX_TIMESTAMP + 1,
+    ],
+)
+def test_event_update_end_date_out_of_bounds(invalid_end_date: int) -> None:
+    """
+    Параметризованная проверка валидации выхода даты окончания (end_date)
+    за допустимые физические границы шкалы времени платформы в схеме EventUpdate.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        EventUpdate(end_date=invalid_end_date)
+
+    assert "Дата окончания события выходит за допустимые границы платформы" in str(exc_info.value)
 
 
 # --- Тестирование схем медиа-данных и мониторинга ---

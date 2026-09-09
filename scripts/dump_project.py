@@ -1,9 +1,15 @@
+"""
+Служебный скрипт автоматической сборки контекста проекта в единый текстовый файл.
+Выполняет рекурсивный обход директорий, строит ASCII-дерево структуры и упаковывает
+исходный код с синтаксической подсветкой Markdown, исключая артефакты тестов и секреты.
+"""
+
 import os
 from pathlib import Path
 
 # Команда запуска из корневой директории проекта: python scripts/dump_project.py
 
-# Список исключаемых директорий (виртуальные окружения, кэш, служебные папки)
+# Список исключаемых директорий (виртуальные окружения, кэш, служебные папки, отчеты покрытия)
 IGNORED_DIRS: set[str] = {
     ".venv",
     "venv",
@@ -20,6 +26,7 @@ IGNORED_DIRS: set[str] = {
     "dist",
     "build",
     "coverage",
+    "htmlcov",
 }
 
 # Расширения бинарных файлов, баз данных, логов и медиа, исключаемые из выгрузки
@@ -48,11 +55,12 @@ IGNORED_EXTENSIONS: set[str] = {
     ".d.ts",
 }
 
-# Имена файлов, исключаемые из выгрузки (включая секреты и файлы окружения)
+# Имена файлов, исключаемые из выгрузки (включая секреты, артефакты тестов и файлы окружения)
 IGNORED_FILENAMES: set[str] = {
     ".env",
     ".env.local",
     ".env.production",
+    ".coverage",
     "project_context.txt",
     "package.json",
     "package-lock.json",
@@ -86,7 +94,6 @@ def should_ignore_file(file_path: Path) -> bool:
     Определяет, должен ли файл быть исключен из обработки.
     Приоритетно блокирует файлы конфигурации окружения и секреты.
     """
-
     # Явное разрешение обработки эталонного файла конфигурации переменных окружения
     if file_path.name == ".env.example":
         return False
@@ -100,10 +107,7 @@ def should_ignore_file(file_path: Path) -> bool:
         return True
 
     # Проверка суффикса (расширения) файла на вхождение в список игнорируемых форматов
-    if file_path.suffix.lower() in IGNORED_EXTENSIONS:
-        return True
-
-    return False
+    return file_path.suffix.lower() in IGNORED_EXTENSIONS
 
 
 def get_syntax_language(file_path: Path) -> str:
@@ -117,8 +121,9 @@ def generate_ascii_tree(current_dir: Path, prefix: str = "") -> list[str]:
     """Рекурсивно формирует текстовое дерево каталогов проекта (ASCII Tree)."""
     tree_lines: list[str] = []
     try:
+        # Сортировка элементов директории напрямую из итератора без промежуточного list()
         entries = sorted(
-            list(current_dir.iterdir()),
+            current_dir.iterdir(),
             key=lambda item: (item.is_file(), item.name.lower()),
         )
     except PermissionError:
@@ -168,7 +173,8 @@ def main() -> None:
     output_file_path = root_dir / "project_context.txt"
 
     target_files = scan_project_files(root_dir)
-    tree_structure = [f"{root_dir.name}/"] + generate_ascii_tree(root_dir)
+    # Формирование структуры дерева через распаковку итератора
+    tree_structure = [f"{root_dir.name}/", *generate_ascii_tree(root_dir)]
 
     total_lines_count = 0
 
@@ -189,7 +195,7 @@ def main() -> None:
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
             except Exception as read_error:
-                content = f"// Ошибка чтения содержимого файла: {str(read_error)}"
+                content = f"// Ошибка чтения содержимого файла: {read_error!s}"
 
             file_lines = len(content.splitlines())
             total_lines_count += file_lines

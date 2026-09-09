@@ -94,22 +94,16 @@ class Settings(BaseSettings):
         description="Имя тестовой базы данных",
     )
 
-    @classmethod
     @field_validator("app_env", mode="before")
+    @classmethod
     def normalize_app_env(cls, value: object) -> object:
         """
         Валидатор предварительной обработки значения APP_ENV.
-        Очищает строку от пробелов, приводит к нижнему регистру и проверяет
-        принадлежность к допустимому набору сред исполнения (local, ci, prod).
+        Очищает строку от пробелов и приводит к нижнему регистру перед передачей
+        на проверку соответствия аннотации Literal['local', 'ci', 'prod'].
         """
         if isinstance(value, str):
-            normalized = value.strip().lower()
-            allowed_environments = {"local", "ci", "prod"}
-            if normalized not in allowed_environments:
-                raise ValueError(
-                    f"Недопустимое значение APP_ENV='{value}'. Разрешены только значения: local, ci, prod."
-                )
-            return normalized
+            return value.strip().lower()
         return value
 
     @property

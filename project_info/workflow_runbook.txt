@@ -1,0 +1,34 @@
+=======================================================
+ПОШАГОВЫЙ РЕГЛАМЕНТ ФИКСАЦИИ И ВЫГРУЗКИ РЕЛИЗА
+СТАТИЧЕСКИЙ АНАЛИЗ И СТИЛЬ (RUFF)
+ruff format .
+ruff check --fix .
+ruff check .
+ruff format --check .
+
+МИГРАЦИИ СХЕМЫ БАЗЫ ДАННЫХ (ALEMBIC)
+alembic upgrade head
+
+ПОЛНЫЙ ТЕСТОВЫЙ ПРОГОН (PYTEST)
+pytest
+
+КОНТРОЛЬ СТАТУСА GIT
+git status
+
+ИНДЕКСАЦИЯ И АТОМАРНЫЙ КОММИТ
+git add .
+git commit -m "refactor(core): завершение спринта стабилизации и укрепление тестового контура"
+
+ВЫГРУЗКА В РЕПОЗИТОРИЙ GITHUB
+git push origin master
+
+РУЧНОЕ ПОДТВЕРЖДЕНИЕ В GITHUB ACTIONS (CD)
+
+Перейти в репозиторий на GitHub -> вкладка Actions.
+
+Открыть текущий запуск воркфлоу.
+
+Нажать Review deployments на шаге production.
+
+Выбрать production и нажать Approve and deploy.
+=======================================================

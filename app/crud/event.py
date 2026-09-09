@@ -15,21 +15,30 @@ from app.schemas.event import EventCreate, EventUpdate
 async def create_event(
     session: AsyncSession,
     event_in: EventCreate,
+    status: str | None = None,
 ) -> Event:
     """
     Создание нового исторического события в контексте открытой транзакции.
     Выполняет сериализацию схемы в JSON-совместимые примитивы через mode="json",
     предотвращая передачу специальных объектов Pydantic (Url, Enum) в драйвер asyncpg.
+    Принимает опциональный строковый статус модерации, сохраняя независимость
+    слоя доступа к данным от доменных перечислений сервисного ядра.
     Выполняет flush для генерации первичного ключа без фиксации транзакции.
     """
-    # Преобразование Pydantic-схемы в словарь JSON-примитивов для безопасной записи в JSONB и Enum колонки
+    # Преобразование Pydantic-схемы в словарь JSON-примитивов для безопасной записи в базу данных
     event_data = event_in.model_dump(mode="json")
+
+    # Установка статуса модерации при его явной передаче из вызывающего сервиса
+    if status is not None:
+        event_data["status"] = status
+
+    # Создание экземпляра ORM-модели на основе подготовленных данных
     db_event = Event(**event_data)
 
-    # Регистрация новой сущности в сессии
+    # Регистрация новой сущности в сессии базы данных
     session.add(db_event)
 
-    # Отправка SQL INSERT в базу данных для получения первичного ключа id
+    # Отправка SQL INSERT в базу данных для генерации первичного ключа id
     await session.flush()
 
     return db_event
@@ -55,20 +64,47 @@ async def get_event_by_id(
 
 async def get_events(
     session: AsyncSession,
+    status: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> Sequence[Event]:
     """
-    Постраничная выборка исторических событий.
+    Постраничная выборка исторических событий с опциональной фильтрацией по статусу.
     Сортирует записи в строгом хронологическом порядке по возрастанию start_date.
     """
-    # Построение запроса с хронологической сортировкой и пагинацией
-    statement = select(Event).order_by(Event.start_date.asc()).offset(skip).limit(limit)
+    # Построение базового SQL-выражения выборки
+    statement = select(Event)
+
+    # Применение фильтра статуса модерации при его передаче
+    if status is not None:
+        statement = statement.where(Event.status == status)
+
+    # Сортировка по возрастанию даты начала и применение смещения пагинации
+    statement = statement.order_by(Event.start_date.asc()).offset(skip).limit(limit)
 
     # Выполнение запроса
     result = await session.execute(statement)
 
     # Возврат последовательности найденных ORM-моделей
+    return result.scalars().all()
+
+
+async def get_events_by_parent_id(
+    session: AsyncSession,
+    parent_id: int,
+) -> Sequence[Event]:
+    """
+    Выборка всех исторических событий, дочерних по отношению к указанному родителю.
+    Используется сервисным слоем для контроля инвариантов иерархии и предотвращения
+    инверсии масштабов детализации при обновлении ранга события.
+    """
+    # Формирование запроса на выборку всех прямых потомков по внешнему ключу parent_id
+    statement = select(Event).where(Event.parent_id == parent_id)
+
+    # Асинхронное выполнение запроса к базе данных
+    result = await session.execute(statement)
+
+    # Возврат последовательности дочерних сущностей
     return result.scalars().all()
 
 
@@ -156,12 +192,13 @@ async def delete_event(
     await session.flush()
 
 
-# Явный список публичных функций слоя доступа к данным
+# Явный список публичных функций слоя доступа к данным в алфавитном порядке
 __all__: list[str] = [
     "create_event",
     "delete_event",
     "get_event_by_id",
     "get_events",
+    "get_events_by_parent_id",
     "get_events_in_range",
     "update_event",
 ]

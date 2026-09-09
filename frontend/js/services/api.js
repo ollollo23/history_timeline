@@ -85,11 +85,11 @@ export async function fetchEvents(skip = 0, limit = 100) {
 
 /**
  * Выборка исторических событий по временному диапазону с фильтрацией и пагинацией.
+ * Публичная лента бэкенда возвращает исключительно подтвержденный контент (status=approved).
  *
  * @param {number} fromDate Начальная временная метка диапазона (BIGINT).
  * @param {number} toDate Конечная временная метка диапазона (BIGINT).
  * @param {Array<string>} [categories=[]] Список категорий для фильтрации.
- * @param {string|null} [status=null] Фильтр по статусу модерации.
  * @param {number} [skip=0] Смещение пагинации.
  * @param {number} [limit=500] Лимит выборки событий.
  * @returns {Promise<Array<Object>>} Массив событий, пересекающих заданный интервал.
@@ -99,7 +99,6 @@ export async function fetchEventsInRange(
     fromDate,
     toDate,
     categories = [],
-    status = null,
     skip = 0,
     limit = 500
 ) {
@@ -110,11 +109,6 @@ export async function fetchEventsInRange(
         skip: skip.toString(),
         limit: limit.toString(),
     });
-
-    // Добавление фильтра статуса модерации при его наличии
-    if (status) {
-        params.append('status', status);
-    }
 
     // Добавление категорий отдельными повторяющимися query-параметрами
     if (Array.isArray(categories) && categories.length > 0) {

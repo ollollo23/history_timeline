@@ -81,6 +81,17 @@ class Event(Base):
             f"start_date >= {TIMELINE_MIN_TIMESTAMP} AND start_date <= {TIMELINE_MAX_TIMESTAMP}",
             name="ck_events_start_date_bounds",
         ),
+        # Контроль вхождения даты окончания события в глобальные физические границы таймлайна
+        CheckConstraint(
+            "end_date IS NULL OR ("
+            f"end_date >= {TIMELINE_MIN_TIMESTAMP} AND end_date <= {TIMELINE_MAX_TIMESTAMP})",
+            name="ck_events_end_date_bounds",
+        ),
+        # Контроль формата медиа-вложений: допустим только JSON-массив либо NULL
+        CheckConstraint(
+            "media_payload IS NULL OR jsonb_typeof(media_payload) = 'array'",
+            name="ck_events_media_payload_is_array",
+        ),
         # Индекс для комбинированной фильтрации по категории и хронологической сортировки
         Index(
             "ix_events_category_start_date",
@@ -179,8 +190,9 @@ class Event(Base):
     )
 
     # Неструктурированные медиа-данные, ссылки на видео и изображения в формате JSONB
+    # none_as_null=True обеспечивает передачу SQL NULL при значении None вместо 'null'::jsonb
     media_payload: Mapped[dict | list | None] = mapped_column(
-        JSONB,
+        JSONB(none_as_null=True),
         nullable=True,
     )
 
@@ -198,7 +210,9 @@ class Event(Base):
         server_default=func.now(),
     )
 
-    # Системная временная метка последней модификации записи (актуализируется триггером/сервером)
+    # Системная временная метка последней модификации записи. Актуализируется на уровне
+    # SQLAlchemy ORM при вызовах через сессию (onupdate=func.now()). Не срабатывает при
+    # прямых SQL-запросах UPDATE в обход ORM, включая ручные правки через базу данных.
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,

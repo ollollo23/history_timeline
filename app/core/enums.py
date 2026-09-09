@@ -3,10 +3,10 @@
 категорий и календарных систем проекта History Timeline.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class EventRank(str, Enum):
+class EventRank(StrEnum):
     """
     Ранг (уровень детализации) исторического события на оси времени.
     Определяет минимальный масштаб отображения маркера события на таймлайне.
@@ -41,7 +41,7 @@ class EventRank(str, Enum):
         return depth_mapping[self]
 
 
-class EventStatus(str, Enum):
+class EventStatus(StrEnum):
     """
     Жизненный цикл и статус модерации исторического события в системе.
     """
@@ -56,7 +56,7 @@ class EventStatus(str, Enum):
     REJECTED = "rejected"
 
 
-class EventCategory(str, Enum):
+class EventCategory(StrEnum):
     """
     Тематическая категория исторического события для визуальной фильтрации
     и цветового кодирования слоев таймлайна.
@@ -75,7 +75,7 @@ class EventCategory(str, Enum):
     SCIENCE = "science"
 
 
-class CalendarSystem(str, Enum):
+class CalendarSystem(StrEnum):
     """
     Система летоисчисления, используемая для пересчета исторических дат.
     """

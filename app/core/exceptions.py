@@ -58,23 +58,9 @@ class InvalidParentRankError(DomainError):
         super().__init__(message)
 
 
-class DuplicateEventError(DomainError):
-    """
-    Исключение, возникающее при конфликте уникальности сущностей
-    или попытке повторного добавления идентичной исторической записи.
-    """
-
-    def __init__(
-        self,
-        message: str = "Историческое событие с указанными параметрами уже существует в системе",
-    ) -> None:
-        super().__init__(message)
-
-
-# Явное декларирование экспортируемых классов предметной области
+# Явное декларирование экспортируемых классов предметной области в алфавитном порядке
 __all__: list[str] = [
     "DomainError",
-    "DuplicateEventError",
     "EventNotFoundError",
     "InvalidDateRangeError",
     "InvalidParentRankError",

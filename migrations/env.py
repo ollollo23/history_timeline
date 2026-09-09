@@ -37,13 +37,21 @@ target_metadata = Base.metadata
 def get_target_url() -> str:
     """
     Динамическое определение целевой строки подключения к базе данных.
-    Считывает переопределенный через config.set_main_option параметр 'sqlalchemy.url'
-    (используется фикстурами тестов для изоляции тестовой БД), а при его отсутствии
-    возвращает основной database_url из синглтона настроек приложения.
+
+    Приоритет разрешения URL:
+    1. Прямой атрибут 'target_url' из config.attributes (приоритетное чтение защищает
+       от сбоев интерполяции configparser при наличии спецсимволов и знака '%' в паролях
+       тестовых баз данных);
+    2. Переопределенный параметр 'sqlalchemy.url' из alembic.ini (config.get_main_option);
+    3. Базовый database_url из центрального синглтона настроек приложения settings.
     """
+    if "target_url" in config.attributes:
+        return str(config.attributes["target_url"])
+
     custom_url = config.get_main_option("sqlalchemy.url")
     if custom_url and custom_url.strip():
         return custom_url.strip()
+
     return str(settings.database_url)
 
 
