@@ -14,6 +14,13 @@ const routes = {
 };
 
 /**
+ * Ссылка на функцию размонтирования (очистки ресурсов) текущего активного экрана.
+ * Позволяет корректно снимать глобальные слушатели, отключать наблюдатели и останавливать анимации при навигации.
+ * @type {Function|null}
+ */
+let currentUnmount = null;
+
+/**
  * Программный переход по указанному маршруту с безопасным перехватом асинхронных ошибок.
  * Обновляет адресную строку через HTML5 History API и запускает процесс смены экрана.
  *
@@ -28,10 +35,20 @@ export function navigateTo(url) {
 }
 
 /**
- * Главный асинхронный диспетчер маршрутизации.
- * Отвечает за рендеринг представлений, синхронизацию навигации и вывод аварийного экрана при сбоях.
+ * Главный асинхронный диспетчер маршрутизации с управлением полным жизненным циклом (mount / unmount).
+ * Отвечает за рендеринг представлений, синхронизацию навигации, очистку ресурсов и вывод аварийного экрана при сбоях.
  */
 export async function router() {
+    // Гарантированная очистка ресурсов предыдущего представления перед монтированием нового экрана
+    if (typeof currentUnmount === 'function') {
+        try {
+            currentUnmount();
+        } catch (unmountError) {
+            console.error('Сбой при размонтировании предыдущего представления:', unmountError);
+        }
+        currentUnmount = null;
+    }
+
     try {
         // Извлечение текущего пути из объекта window.location
         const path = window.location.pathname;
@@ -39,11 +56,33 @@ export async function router() {
         // Определение функции рендеринга из таблицы или fallback на главную страницу
         const viewFunction = routes[path] || routes['/'];
 
+        // Вызов функции представления для получения конфигурации экрана или разметки
+        const viewResult = viewFunction();
+
+        // Поддержка расширенного контракта { html, mount, unmount } и обратная совместимость со строкой
+        const htmlContent =
+            typeof viewResult === 'object' && viewResult !== null
+                ? viewResult.html
+                : viewResult;
+
         // Поиск целевого контейнера для монтирования контента
         const appRoot = document.getElementById('app-root');
         if (appRoot) {
             // Вставка сгенерированной HTML-разметки представления в DOM
-            appRoot.innerHTML = viewFunction();
+            appRoot.innerHTML = htmlContent;
+
+            // Вызов функции монтирования представления при ее наличии
+            if (typeof viewResult?.mount === 'function') {
+                try {
+                    viewResult.mount(appRoot);
+                } catch (mountError) {
+                    console.error('Сбой при монтировании представления:', mountError);
+                }
+            }
+
+            // Сохранение функции размонтирования для последующей очистки перед сменой маршрута
+            currentUnmount =
+                typeof viewResult?.unmount === 'function' ? viewResult.unmount : null;
         }
 
         // Обновление стилей активного состояния для навигационных ссылок меню
@@ -66,8 +105,8 @@ export async function router() {
                     // Динамическая подстановка полученной с сервера версии API
                     apiStatus.textContent = `Статус API: подключено (v${healthData.version || '1.0.0'})`;
                     apiStatus.style.color = '#10b981';
-                } catch (healthError) {
-                    // Обработка отсутствия соединения с сервером
+                } catch {
+                    // Обработка отсутствия соединения с сервером с опциональным связыванием исключения
                     apiStatus.textContent = 'Статус API: ошибка соединения';
                     apiStatus.style.color = '#ef4444';
                 }

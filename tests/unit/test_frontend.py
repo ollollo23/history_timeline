@@ -1,7 +1,7 @@
 """
 Модульные тесты проверки отдачи статических файлов и SPA-маршрутизации.
-Валидирует отдачу index.html, стилей CSS, JavaScript-модулей интерфейса
-и регрессионную целостность путей клиентского роутера.
+Валидирует отдачу index.html, стилей CSS, JavaScript-модулей интерфейса и таймлайна,
+регрессионную целостность путей и контракт жизненного цикла представлений в роутере.
 """
 
 import pytest
@@ -91,10 +91,44 @@ async def test_serve_static_js(async_client: AsyncClient, path: str) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/static/js/timeline/constants.js",
+        "/static/js/timeline/calendar.js",
+        "/static/js/timeline/scale.js",
+        "/static/js/timeline/viewport.js",
+        "/static/js/timeline/ticks.js",
+        "/static/js/timeline/format.js",
+        "/static/js/timeline/renderer.js",
+        "/static/js/timeline/controller.js",
+    ],
+)
+async def test_serve_timeline_static_js(async_client: AsyncClient, path: str) -> None:
+    """
+    Параметризованная проверка отдачи всех восьми JavaScript-модулей ядра таймлайна.
+    Контролирует сетевую доступность клиентских файлов хронологической шкалы,
+    математических проекций, календарных преобразований и рендеринга.
+    Валидирует статус 200 OK и наличие подстроки javascript в заголовке Content-Type.
+    """
+    # Выполнение асинхронного GET-запроса к модулю ядра таймлайна
+    response = await async_client.get(path)
+
+    # Проверка успешного HTTP-статуса ответа сервера
+    assert response.status_code == status.HTTP_200_OK
+
+    # Проверка корректности MIME-типа ответа (application/javascript или text/javascript)
+    assert "javascript" in response.headers["content-type"].lower()
+
+
+@pytest.mark.unit
 async def test_router_js_content_integrity(async_client: AsyncClient) -> None:
     """
     Регрессионная проверка целостности содержимого клиентского маршрутизатора router.js.
-    Проверяет статус 200 OK, отсутствие опечатки в пути файла и наличие корректного пути импорта.
+    Контролирует корректность путей импорта представлений, а также наличие архитектурного
+    контракта жизненного цикла экранов (переменной currentUnmount, вызова функции очистки
+    currentUnmount(), изолированного блока перехвата unmountError и точки монтирования mount).
+    Это исключает утечки памяти при переключении экранов с Canvas-анимациями и слушателями событий.
     """
     # Запрос содержимого модуля маршрутизации
     response = await async_client.get("/static/js/router.js")
@@ -107,6 +141,18 @@ async def test_router_js_content_integrity(async_client: AsyncClient) -> None:
 
     # Контроль обязательного наличия легитимного пути к представлению создания события
     assert "/views/create_event.js" in response.text
+
+    # Контроль объявления переменной отслеживания активной функции очистки ресурсов
+    assert "currentUnmount" in response.text
+
+    # Контроль гарантированного вызова функции размонтирования перед сменой экрана
+    assert "currentUnmount()" in response.text
+
+    # Контроль наличия изолированного перехвата исключений очистки памяти
+    assert "unmountError" in response.text
+
+    # Контроль вызова метода монтирования нового экрана
+    assert "mount(" in response.text
 
 
 @pytest.mark.unit

@@ -42,6 +42,25 @@ jobs:
       - name: Check code formatting
         run: ruff format --check .
 
+      # Шаг 7: Развертывание среды исполнения Node.js LTS с кэшированием пакетного менеджера npm
+      - name: Set up Node.js LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      # Шаг 8: Детерминированная установка зависимостей клиентского контура по package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Шаг 9: Запуск статического анализатора клиентского кода ESLint
+      - name: Run frontend linter
+        run: npm run lint
+
+      # Шаг 10: Запуск набора модульных тестов клиентского математического ядра
+      - name: Run frontend unit tests
+        run: npm test
+
   guard:
     name: Secret and Pre-flight Guard
     runs-on: ubuntu-latest

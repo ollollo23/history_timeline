@@ -19,6 +19,15 @@ __pycache__/
 # Отчеты тестирования и покрытия кода
 .coverage
 htmlcov/
+coverage/
+.nyc_output/
+
+# Зависимости и пакетные менеджеры Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
 # Артефакты сборки и метаданные пакетов
 *.egg-info/

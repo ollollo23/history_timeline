@@ -62,7 +62,6 @@ IGNORED_FILENAMES: set[str] = {
     ".env.production",
     ".coverage",
     "project_context.txt",
-    "package.json",
     "package-lock.json",
     "kilo.jsonc",
     "pnpm-lock.yaml",

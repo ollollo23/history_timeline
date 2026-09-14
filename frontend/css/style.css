@@ -96,3 +96,111 @@ body {
     color: var(--text-secondary);
     font-size: 1rem;
 }
+
+/* ==============================================================================
+   РАБОЧАЯ ОБЛАСТЬ ИНТЕРАКТИВНОГО ТАЙМЛАЙНА (CANVAS & CONTROLS)
+   ============================================================================== */
+
+/* Относительно позиционированный контейнер интерактивного холста */
+.timeline-container {
+    position: relative;
+    width: 100%;
+    height: 320px;
+    overflow: hidden;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-top: 1.5rem;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Интерактивный холст: блочное отображение устраняет подстрочный зазор */
+.timeline-canvas,
+#timeline-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+    outline: none;
+}
+
+/* Активное состояние холста в момент перетаскивания мышью */
+.timeline-canvas:active,
+#timeline-canvas:active,
+.timeline-canvas.grabbing {
+    cursor: grabbing;
+}
+
+/* Панель инструментов и отображения статуса таймлайна под холстом */
+.timeline-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+
+/* Группа текстовых индикаторов в панели инструментов */
+.timeline-info-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+/* Вторичные текстовые подписи информационных блоков */
+.timeline-info-label {
+    color: var(--text-secondary);
+}
+
+/* Выводимые числовые значения диапазонов и масштаба шкалы */
+.timeline-info-value,
+#timeline-range-info,
+#timeline-scale-info {
+    color: var(--text-primary);
+    font-family: monospace;
+    font-weight: 600;
+}
+
+/* Кнопка сброса положения виртуальной камеры таймлайна */
+.timeline-btn,
+#timeline-reset-btn {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.85rem;
+    background-color: var(--bg-accent);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Индикация наведения курсора на кнопку сброса */
+.timeline-btn:hover,
+#timeline-reset-btn:hover {
+    background-color: var(--border-color);
+    color: var(--color-accent);
+}
+
+/* Бейдж проверки связи и статуса API */
+.api-status-badge {
+    display: inline-block;
+    margin-top: 0.75rem;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    font-family: monospace;
+    background-color: var(--bg-accent);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+}
