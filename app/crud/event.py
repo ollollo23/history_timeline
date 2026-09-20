@@ -5,7 +5,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import and_, select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.event import Event
@@ -113,26 +113,39 @@ async def get_events_in_range(
     from_date: int,
     to_date: int,
     categories: list[str] | None = None,
+    ranks: list[str] | None = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 500,
 ) -> Sequence[Event]:
     """
-    Выборка событий, попадающих во временной диапазон [from_date, to_date].
-    Использует хранимую вычисляемую колонку end_date_effective для быстрого
-    поиска пересечений через композитный индекс без ветвлений OR.
+    Выборка событий, попадающих во временной диапазон [from_date, to_date],
+    с опциональной фильтрацией по категориям, рангам масштабирования и статусу модерации.
+    Использует оператор перекрытия диапазонов (&&) для задействования
+    функционального GiST-индекса ix_events_int8range_gist.
     """
-    # Фильтрация пересечения интервалов события с видимым окном таймлайна
-    time_filter = and_(
-        Event.start_date <= to_date,
-        Event.end_date_effective >= from_date,
-    )
+    # Предикат пересечения интервалов через оператор перекрытия диапазонов PostgreSQL (&&).
+    # Форма выражения int8range(events.start_date, events.end_date_effective, '[]')
+    # выбрана для задействования функционального GiST-индекса ix_events_int8range_gist,
+    # созданного миграцией a1b2c3d4e5f6.
+    time_filter = text(
+        "int8range(events.start_date, events.end_date_effective, '[]') && "
+        "int8range(:from_date, :to_date, '[]')"
+    ).bindparams(from_date=from_date, to_date=to_date)
 
     statement = select(Event).where(time_filter)
 
-    # Фильтрация по списку выбранных категорий
-    if categories:
+    # Фильтрация по списку выбранных категорий.
+    # Строгая проверка на None разделяет отсутствие фильтра и явную передачу пустого списка,
+    # который транслируется SQLAlchemy в заведомо ложный предикат (1 = 0), гарантируя пустую выдачу.
+    if categories is not None:
         statement = statement.where(Event.category.in_(categories))
+
+    # Фильтрация по уровням детализации (рангам масштабирования).
+    # Строгая проверка на None разделяет отсутствие фильтра и явную передачу пустого списка,
+    # который транслируется SQLAlchemy в заведомо ложный предикат (1 = 0), гарантируя пустую выдачу.
+    if ranks is not None:
+        statement = statement.where(Event.rank.in_(ranks))
 
     # Фильтрация по статусу модерации (например, EventStatus.APPROVED)
     if status is not None:

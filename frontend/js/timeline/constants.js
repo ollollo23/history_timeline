@@ -185,3 +185,57 @@ export const TICK_LADDER = Object.freeze([
     Object.freeze({ unit: 'millennium', step: 100, majorStep: 500 }),
     Object.freeze({ unit: 'millennium', step: 500, majorStep: 1000 }),
 ]);
+
+
+// ==============================================================================
+// 6. ПАРАМЕТРЫ СЕТЕВОЙ ЗАГРУЗКИ ДАННЫХ И ГЕОМЕТРИИ МАРКЕРОВ (EVENTS & MARKERS)
+// ==============================================================================
+
+/**
+ * Мягкий предел количества запрашиваемых записей с сервера по умолчанию.
+ * Согласован со стандартным лимитом эндпоинта GET /api/v1/events/range.
+ */
+export const DEFAULT_SOFT_LIMIT = 500;
+export const EVENTS_SOFT_LIMIT = DEFAULT_SOFT_LIMIT;
+
+/**
+ * Множитель ширины упреждающего окна загрузки данных.
+ * Загружает интервал втрое шире видимой области экрана для устранения сетевых задержек при панорамировании.
+ */
+export const DEFAULT_PREFETCH_MULTIPLIER = 3;
+export const PREFETCH_WINDOW_MULTIPLIER = DEFAULT_PREFETCH_MULTIPLIER;
+
+/**
+ * Задержка подавления частоты сетевых запросов (debounce) в миллисекундах.
+ * Предотвращает множественные сетевые вызовы при непрерывном перемещении указателя мыши.
+ */
+export const DEFAULT_DEBOUNCE_MS = 250;
+export const DEBOUNCE_DELAY_MS = DEFAULT_DEBOUNCE_MS;
+
+/**
+ * Радиус точечного маркера исторического события в логических пикселях.
+ */
+export const MARKER_POINT_RADIUS = 4;
+
+/**
+ * Высота прямоугольной полосы интервального события в логических пикселях.
+ */
+export const MARKER_BAR_HEIGHT = 8;
+
+/**
+ * Минимальная ширина полосы интервального маркера в пикселях.
+ * События с меньшей экранной длиной отображаются точечными маркерами во избежание вырождения в невидимые линии.
+ */
+export const MIN_EVENT_BAR_WIDTH_PX = 4;
+
+/**
+ * Вертикальное смещение центра полосы маркеров вверх от базовой горизонтальной оси в пикселях.
+ */
+export const MARKER_OFFSET_FROM_AXIS = 28;
+
+/**
+ * Предельный защитный потолок числа одновременно отображаемых маркеров на кадр.
+ * Предотвращает просадку частоты кадров графического конвейера ниже 60 FPS при плотных выборках.
+ */
+export const MAX_RENDERED_MARKERS_CEILING = 500;
+export const MAX_RENDERED_MARKERS = MAX_RENDERED_MARKERS_CEILING;

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.database import get_db
-from app.core.enums import EventCategory, EventStatus
+from app.core.enums import EventCategory, EventRank, EventStatus
 from app.models.event import Event
 from app.schemas.event import EventCreate, EventResponse, EventUpdate
 from app.services.event_service import (
@@ -88,6 +88,10 @@ async def read_events_in_range(
         default=None,
         description="Список категорий для фильтрации",
     ),
+    ranks: list[EventRank] | None = Query(
+        default=None,
+        description="Список рангов детализации событий для фильтрации",
+    ),
     skip: int = Query(
         default=0,
         ge=0,
@@ -103,17 +107,28 @@ async def read_events_in_range(
 ) -> Sequence[Event]:
     """
     Выборка исторических событий, пересекающих заданный хронологический интервал.
-    Публичная лента таймлайна возвращает исключительно одобренный контент (status='approved').
-    Фильтрация по статусам и модераторские выборки будут реализованы на шаге 5 в рамках ролевой модели.
+
+    Параметры фильтрации:
+    - from_date, to_date: обязательные границы хронологического окна в секундах Unix;
+    - categories: список категорий (culture, politics, economy, science);
+    - ranks: список уровней детализации событий (century, decade, year, month, day, hour, minute, second);
+      при отсутствии параметра фильтр не применяется, при передаче пустого набора возвращается пустой список;
+    - skip, limit: параметры смещения и ограничения размера результирующей выборки.
+
+    Публичная выдача таймлайна строго ограничена одобренным контентом (status='approved').
     """
     # Преобразование перечислений EventCategory в список строковых примитивов для слоя данных
     raw_categories = [category.value for category in categories] if categories else None
+
+    # Преобразование перечислений EventRank в список строковых примитивов с сохранением пустого списка
+    raw_ranks = [rank.value for rank in ranks] if ranks is not None else None
 
     return await list_events_in_range(
         session=session,
         from_date=from_date,
         to_date=to_date,
         categories=raw_categories,
+        ranks=raw_ranks,
         status=EventStatus.APPROVED.value,
         skip=skip,
         limit=limit,

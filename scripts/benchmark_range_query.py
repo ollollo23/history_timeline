@@ -2,7 +2,8 @@
 Консольная утилита нагрузочного профилирования и анализа планов выполнения
 диапазонных запросов к таблице events в тестовой базе данных PostgreSQL 18.
 Сравнивает эффективность композитного B-Tree индекса и функционального GiST-индекса,
-измеряет буферные попадания (Shared Buffers) и селективность предикатов.
+измеряет буферные попадания (Shared Buffers), селективность предикатов и влияние
+фильтрации по уровням детализации (рангам).
 """
 
 import argparse
@@ -15,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
@@ -50,28 +53,47 @@ BENCHMARK_RANGES: list[dict[str, Any]] = [
     },
 ]
 
-# SQL-выражение для замера производительности с предикатом B-Tree индекса
+# SQL-выражение для замера производительности B-Tree индекса с предикатом по рангам
 BTREE_EXPLAIN_QUERY = text(
     """
     EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-    SELECT id, title, start_date, end_date_effective
+    SELECT id, title, start_date, end_date_effective, rank
     FROM events
     WHERE start_date <= :to_date
       AND end_date_effective >= :from_date
+      AND rank = ANY(:ranks)
       AND status = 'approved';
     """
 )
 
-# SQL-выражение для замера производительности с предикатом GiST-индекса через оператор &&
+# SQL-выражение для замера производительности GiST-индекса с предикатом по рангам
 GIST_EXPLAIN_QUERY = text(
     """
     EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-    SELECT id, title, start_date, end_date_effective
+    SELECT id, title, start_date, end_date_effective, rank
     FROM events
     WHERE int8range(start_date, end_date_effective, '[]') && int8range(:from_date, :to_date, '[]')
+      AND rank = ANY(:ranks)
       AND status = 'approved';
     """
 )
+
+
+def ensure_test_database_schema(target_url: str) -> None:
+    """
+    Синхронный накат миграций схемы базы данных через Alembic до ревизии head.
+
+    Выполняется до запуска цикла событий asyncio для предотвращения конфликта
+    вложенных вызовов asyncio.run() внутри migrations/env.py.
+    Передача целевой строки подключения через alembic_cfg.attributes['target_url']
+    изолирует операцию в тестовой базе данных без затрагивания основной БД.
+    """
+    print(f"[*] Проверка и актуализация схемы тестовой базы данных: {target_url}...")
+    alembic_cfg = Config(str(BASE_DIR / "alembic.ini"))
+    alembic_cfg.attributes["target_url"] = target_url
+
+    command.upgrade(alembic_cfg, "head")
+    print("[+] Схема тестовой базы данных успешно обновлена до ревизии head.")
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -94,10 +116,16 @@ def parse_arguments() -> argparse.Namespace:
         help="Число итераций выборки для усреднения замеров (по умолчанию 50).",
     )
     parser.add_argument(
+        "--ranks",
+        type=str,
+        default="century,decade,year",
+        help="Список рангов через запятую для фильтрации в бенчмарке (по умолчанию: century,decade,year).",
+    )
+    parser.add_argument(
         "--keep-data",
         action="store_true",
         default=False,
-        help="Сохранить сгенерированные синтетические данные в базе данных после завершения замеров (по умолчанию данные автоматически удаляются).",
+        help="Сохранить сгенерированные синтетические данные в базе данных после завершения замеров.",
     )
     return parser.parse_args()
 
@@ -190,7 +218,7 @@ async def populate_dataset(
     rate = int(inserted_count / elapsed) if elapsed > 0 else 0
     print(f"[+] Синтетический датасет сформирован за {elapsed:.2f} сек. ({rate} строк/сек).")
 
-    # Принудительное обновление статистики планировщика запросов
+    # Принудительное обновление статистики оптимизатора PostgreSQL
     print("[*] Обновление статистики оптимизатора (ANALYZE events)...")
     async with engine.begin() as conn:
         await conn.execute(text("ANALYZE events;"))
@@ -245,7 +273,7 @@ def extract_plan_metrics(plan_raw: Any) -> dict[str, Any]:
     }
 
 
-async def warmup_buffers(engine: AsyncEngine) -> None:
+async def warmup_buffers(engine: AsyncEngine, ranks: list[str]) -> None:
     """
     Прогрев буферного пула Shared Buffers перед началом фиксации замеров.
     """
@@ -255,7 +283,11 @@ async def warmup_buffers(engine: AsyncEngine) -> None:
             for _ in range(5):
                 await conn.execute(
                     BTREE_EXPLAIN_QUERY,
-                    {"from_date": rng["from_date"], "to_date": rng["to_date"]},
+                    {
+                        "from_date": rng["from_date"],
+                        "to_date": rng["to_date"],
+                        "ranks": ranks,
+                    },
                 )
     print("[+] Буферный пул прогрет, дисковые задержки холодного старта исключены.")
 
@@ -265,6 +297,7 @@ async def benchmark_query_suite(
     query_stmt: Any,
     query_label: str,
     iterations: int,
+    ranks: list[str],
 ) -> list[dict[str, Any]]:
     """
     Исполнение тестовых замеров по набору интервалов с вычислением средних метрик.
@@ -287,7 +320,11 @@ async def benchmark_query_suite(
             for _ in range(iterations):
                 res = await conn.execute(
                     query_stmt,
-                    {"from_date": rng["from_date"], "to_date": rng["to_date"]},
+                    {
+                        "from_date": rng["from_date"],
+                        "to_date": rng["to_date"],
+                        "ranks": ranks,
+                    },
                 )
                 metrics = extract_plan_metrics(res.scalar())
                 exec_times.append(metrics["execution_time_ms"])
@@ -401,7 +438,8 @@ def evaluate_architecture_verdict(btree_results: list[dict[str, Any]]) -> None:
                 f"(превышает норматив 15%);"
             )
         print(
-            "    - Рекомендация: внедрить функциональный GiST-индекс по int8range в спринте масштабирования."
+            "    - Рекомендация: перевести эндпоинт GET /api/v1/events/range на функциональный GiST-индекс "
+            "ix_events_int8range_gist в спринте масштабирования."
         )
     print("=" * 115 + "\n")
 
@@ -423,12 +461,16 @@ async def run_benchmark() -> None:
     args = parse_arguments()
     engine = create_async_engine(settings.test_database_url, echo=False)
 
+    target_ranks = [r.strip() for r in args.ranks.split(",") if r.strip()]
+
     try:
         # 1. Наполнение синтетическим датасетом
         await populate_dataset(engine, total_rows=args.size)
 
-        # 2. Прогрев дискового кэша СУБД
-        await warmup_buffers(engine)
+        print(f"[*] Целевой набор рангов для фильтрации: {target_ranks}")
+
+        # 2. Прогрев дискового кэша СУБД с передачей параметров рангов
+        await warmup_buffers(engine, ranks=target_ranks)
 
         all_results: list[dict[str, Any]] = []
 
@@ -438,6 +480,7 @@ async def run_benchmark() -> None:
             query_stmt=BTREE_EXPLAIN_QUERY,
             query_label="B-Tree (AND)",
             iterations=args.iterations,
+            ranks=target_ranks,
         )
         all_results.extend(btree_results)
 
@@ -451,6 +494,7 @@ async def run_benchmark() -> None:
                 query_stmt=GIST_EXPLAIN_QUERY,
                 query_label="GiST (&&)",
                 iterations=args.iterations,
+                ranks=target_ranks,
             )
             all_results.extend(gist_results)
         else:
@@ -475,9 +519,11 @@ async def run_benchmark() -> None:
 
 def main() -> None:
     """
-    Точка входа скрипта с обработкой прерывания Ctrl+C.
+    Точка входа скрипта с синхронным накатом миграций и обработкой прерывания Ctrl+C.
     """
     try:
+        # Синхронная актуализация схемы тестовой базы данных до запуска asyncio-раннера
+        ensure_test_database_schema(settings.test_database_url)
         asyncio.run(run_benchmark())
     except KeyboardInterrupt:
         print("\n[!] Прерывание работы пользователем (Ctrl+C). Аварийный выход.")

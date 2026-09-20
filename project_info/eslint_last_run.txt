@@ -1,4 +1,2 @@
-
-> history-timeline-frontend@1.0.0 lint
-> eslint .
-
+npm notice run history-timeline-frontend@1.0.0 lint
+npm notice run eslint .

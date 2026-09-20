@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import EventRank, EventStatus
 from app.core.exceptions import (
+    DomainError,
     EventNotFoundError,
     InvalidDateRangeError,
     InvalidParentRankError,
@@ -129,22 +130,29 @@ async def list_events_in_range(
     from_date: int,
     to_date: int,
     categories: list[str] | None = None,
+    ranks: list[str] | None = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 500,
 ) -> Sequence[Event]:
     """
-    Выборка событий в заданном временном диапазоне с валидацией границ.
+    Выборка событий в заданном временном диапазоне с валидацией границ и уровней детализации.
+
+    Ограничение выборки по параметру ranks фильтрует события теми уровнями детализации,
+    которые соответствуют текущему масштабу отображения таймлайна на клиенте.
+    Визуальное прореживание плотности маркеров на экране относится к шагу 3 дорожной карты.
 
     :param session: Активная асинхронная сессия SQLAlchemy.
     :param from_date: Начальная временная метка диапазона (в секундах).
     :param to_date: Конечная временная метка диапазона (в секундах).
     :param categories: Список категорий для фильтрации.
+    :param ranks: Список допустимых рангов детализации событий.
     :param status: Статус модерации события.
     :param skip: Смещение пагинации.
     :param limit: Лимит выборки событий.
     :return: Последовательность найденных событий.
     :raises InvalidDateRangeError: Если to_date меньше from_date.
+    :raises DomainError: Если в переданном наборе ranks присутствует неизвестный ранг.
     """
     # Доменная валидация корректности запрошенного временного интервала
     if to_date < from_date:
@@ -152,11 +160,28 @@ async def list_events_in_range(
             "Конечная дата диапазона (to_date) не может быть меньше начальной даты (from_date)."
         )
 
+    # Доменная валидация и применение политики фильтрации по рангам
+    if ranks is not None:
+        # Случай А: передан пустой список рангов — немедленный возврат без обращения к СУБД
+        if len(ranks) == 0:
+            return []
+
+        # Случай Б: валидация допустимости каждого переданного строкового ранга
+        allowed_ranks = {rank.value for rank in EventRank}
+        for rank_value in ranks:
+            if rank_value not in allowed_ranks:
+                raise DomainError(
+                    f"Недопустимый ранг исторического события: '{rank_value}'. "
+                    f"Допустимые значения: {sorted(allowed_ranks)}."
+                )
+
+    # Делегирование запроса слою доступа к данным
     return await crud_get_events_in_range(
         session,
         from_date=from_date,
         to_date=to_date,
         categories=categories,
+        ranks=ranks,
         status=status,
         skip=skip,
         limit=limit,

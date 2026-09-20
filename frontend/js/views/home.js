@@ -54,7 +54,8 @@ export function renderHome() {
     let resetClickListener = null;
     let savedResetBtnElement = null;
     let statusRafId = null;
-    let pendingStatusState = null;
+    let pendingViewportState = null;
+    let pendingStoreState = null;
 
     const html = `
         <section class="view-card">
@@ -72,11 +73,14 @@ export function renderHome() {
                 <canvas id="timeline-canvas" style="display: block; width: 100%; height: 100%; cursor: grab; outline: none;"></canvas>
             </div>
 
-            <!-- Служебная панель управления и отображения статуса камеры -->
+            <!-- Служебная панель управления и отображения статуса камеры и контура данных -->
             <div class="timeline-toolbar" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.875rem;">
                 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem;">
                     <div><span style="color: var(--text-secondary);">Видимый диапазон: </span><strong id="timeline-range-info" style="color: var(--text-primary); font-family: monospace;">—</strong></div>
                     <div><span style="color: var(--text-secondary);">Масштаб: </span><strong id="timeline-scale-info" style="color: var(--text-primary); font-family: monospace;">—</strong></div>
+                    <div><span style="color: var(--text-secondary);">Событий: </span><strong id="timeline-events-count" style="color: var(--text-primary); font-family: monospace;">0</strong></div>
+                    <div><span style="color: var(--text-secondary);">Статус: </span><strong id="timeline-loading-status" style="color: var(--text-primary); font-family: monospace;">Ожидание</strong></div>
+                    <div id="timeline-truncation-warning" style="display: none; color: #eab308; font-weight: 500;">Показаны не все события (приблизьте масштаб)</div>
                 </div>
                 <button id="timeline-reset-btn" type="button" class="btn" style="padding: 0.4rem 0.85rem; font-size: 0.85rem; background: var(--bg-accent, #27272a); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">К началу</button>
             </div>
@@ -98,6 +102,9 @@ export function renderHome() {
         const rangeInfoElement = root.querySelector('#timeline-range-info');
         const scaleInfoElement = root.querySelector('#timeline-scale-info');
         const resetBtnElement = root.querySelector('#timeline-reset-btn');
+        const eventsCountElement = root.querySelector('#timeline-events-count');
+        const loadingStatusElement = root.querySelector('#timeline-loading-status');
+        const truncationWarningElement = root.querySelector('#timeline-truncation-warning');
 
         // Прерывание инициализации при отсутствии ключевых элементов рабочей области
         if (!canvasElement || !containerElement) {
@@ -108,34 +115,68 @@ export function renderHome() {
         savedResetBtnElement = resetBtnElement;
 
         /**
-         * Синхронное применение данных состояния к DOM-элементам тулбара.
+         * Синхронное применение данных состояния камеры и хранилища к DOM-элементам тулбара.
          *
-         * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>} state
+         * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>|null} viewportState
+         * @param {Readonly<{status: string, isTruncated: boolean, events: Array<Object>}>|null} storeState
          */
-        const applyStatusUpdate = (state) => {
-            if (!rangeInfoElement || !scaleInfoElement) {
-                return;
+        const applyStatusUpdate = (viewportState, storeState) => {
+            // 1. Обновление диапазона и масштаба камеры
+            if (viewportState && rangeInfoElement && scaleInfoElement) {
+                const spp = zoomIndexToSecondsPerPixel(viewportState.zoomIndex);
+                const duration = calculateVisibleDuration(viewportState.widthPx, spp);
+
+                const startTs = viewportState.originTimestamp;
+                const endTs = startTs + duration;
+
+                // Форматирование диапазона через централизованную функцию модуля format.js
+                rangeInfoElement.textContent = formatContextInterval(startTs, endTs);
+                scaleInfoElement.textContent = formatScaleInfo(spp);
             }
 
-            const spp = zoomIndexToSecondsPerPixel(state.zoomIndex);
-            const duration = calculateVisibleDuration(state.widthPx, spp);
+            // 2. Обновление индикаторов сетевого хранилища
+            if (storeState) {
+                // а) Обновление числа загруженных событий
+                if (eventsCountElement) {
+                    const count = Array.isArray(storeState.events) ? storeState.events.length : 0;
+                    eventsCountElement.textContent = String(count);
+                }
 
-            const startTs = state.originTimestamp;
-            const endTs = startTs + duration;
+                // б) Обновление сетевого статуса с цветовой индикацией
+                if (loadingStatusElement) {
+                    if (storeState.status === 'loading') {
+                        loadingStatusElement.textContent = 'Загрузка...';
+                        loadingStatusElement.style.color = '#3b82f6';
+                    } else if (storeState.status === 'error') {
+                        loadingStatusElement.textContent = 'Отказ';
+                        loadingStatusElement.style.color = '#ef4444';
+                    } else {
+                        loadingStatusElement.textContent = 'Ожидание';
+                        loadingStatusElement.style.color = 'var(--text-primary)';
+                    }
+                }
 
-            // Форматирование диапазона через централизованную функцию модуля format.js
-            rangeInfoElement.textContent = formatContextInterval(startTs, endTs);
-            scaleInfoElement.textContent = formatScaleInfo(spp);
+                // в) Управление видимостью предупреждения об усечении выборки
+                if (truncationWarningElement) {
+                    truncationWarningElement.style.display = storeState.isTruncated
+                        ? 'inline-block'
+                        : 'none';
+                }
+            }
         };
 
         /**
          * Пакетное обновление тулбара с планированием через requestAnimationFrame.
-         * Предотвращает множественные синхронные пересчеты стилей и разметки.
+         * Предотвращает множественные синхронные пересчеты стилей и разметки при панорамировании.
          *
-         * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>} state
+         * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>} viewportState
+         * @param {Readonly<{status: string, isTruncated: boolean, events: Array<Object>}>} [storeState]
          */
-        const updateStatus = (state) => {
-            pendingStatusState = state;
+        const updateStatus = (viewportState, storeState) => {
+            pendingViewportState = viewportState;
+            if (storeState) {
+                pendingStoreState = storeState;
+            }
 
             // Если кадр уже запланирован, пропускаем повторный вызов
             if (statusRafId !== null) {
@@ -144,18 +185,20 @@ export function renderHome() {
 
             statusRafId = requestAnimationFrame(() => {
                 statusRafId = null;
-                if (pendingStatusState) {
-                    applyStatusUpdate(pendingStatusState);
-                }
+                applyStatusUpdate(pendingViewportState, pendingStoreState);
             });
         };
 
         // Создание контроллера интерактивного взаимодействия с холстом
         timelineController = createTimelineController(canvasElement, containerElement, updateStatus);
 
-        // Первичное заполнение индикаторов статуса текущим состоянием камеры
+        // Первичное заполнение индикаторов статуса текущим состоянием камеры и хранилища
         if (timelineController && typeof timelineController.getState === 'function') {
-            applyStatusUpdate(timelineController.getState());
+            const initialStoreState =
+                typeof timelineController.getStoreState === 'function'
+                    ? timelineController.getStoreState()
+                    : null;
+            applyStatusUpdate(timelineController.getState(), initialStoreState);
         }
 
         // Привязка кнопки сброса положения камеры к начальным координатам
@@ -178,7 +221,8 @@ export function renderHome() {
         if (statusRafId !== null) {
             cancelAnimationFrame(statusRafId);
             statusRafId = null;
-            pendingStatusState = null;
+            pendingViewportState = null;
+            pendingStoreState = null;
         }
 
         // Снятие обработчика клика по сохраненной ссылке на кнопку сброса без querySelector
@@ -188,7 +232,7 @@ export function renderHome() {
             savedResetBtnElement = null;
         }
 
-        // Полное уничтожение контроллера таймлайна (Canvas, ResizeObserver, EventListeners)
+        // Полное уничтожение контроллера таймлайна (Canvas, EventStore, ResizeObserver, EventListeners)
         if (timelineController) {
             if (typeof timelineController.destroy === 'function') {
                 timelineController.destroy();

@@ -299,6 +299,50 @@ def test_media_item_invalid_url() -> None:
 
 
 @pytest.mark.unit
+def test_media_payload_sequence_protocol() -> None:
+    """
+    Проверка поддержки методов протокола последовательности (__len__, __getitem__, __iter__)
+    корневой моделью MediaPayload для прозрачной работы с коллекцией медиа-ресурсов.
+    """
+    # Инициализация трех валидных медиа-элементов различных типов
+    item_image = MediaItem(
+        media_type="image",
+        url="https://example.com/image.jpg",
+        title="Фото",
+    )
+    item_video = MediaItem(
+        media_type="video",
+        url="https://example.com/video.mp4",
+        title="Видео",
+    )
+    item_link = MediaItem(
+        media_type="link",
+        url="https://example.com/article",
+        title="Ссылка",
+    )
+
+    # Сборка экземпляра корневой модели MediaPayload
+    payload = MediaPayload([item_image, item_video, item_link])
+
+    # 1. Проверка работы метода __len__
+    assert len(payload) == 3
+
+    # 2. Проверка работы метода __getitem__ по единичным индексам
+    assert payload[0].media_type == "image"
+    assert payload[1].media_type == "video"
+
+    # Проверка работы метода __getitem__ при получении диапазона (среза)
+    sliced = payload[1:]
+    assert isinstance(sliced, list)
+    assert len(sliced) == 2
+    assert sliced[0].media_type == "video"
+
+    # 3. Проверка работы метода __iter__ при прямой итерации через списковое включение
+    extracted_types = [item.media_type for item in payload]
+    assert extracted_types == ["image", "video", "link"]
+
+
+@pytest.mark.unit
 def test_health_response_missing_fields() -> None:
     """
     Проверка обязательности всех трех диагностических полей схемы HealthResponse.

@@ -1,7 +1,7 @@
 """
-Модульные тесты HTTP-эндпоинтов управления событиями /api/v1/events.
-Проверяет маршрутизацию, HTTP-статусы, валидацию Pydantic v2, защитные middleware
-и централизованную обработку доменных и системных исключений.
+Модульные тесты HTTP-эндпоинтов управления событиями /api/v1/events и сервисного слоя.
+Проверяет маршрутизацию, HTTP-статусы, валидацию Pydantic v2, защитные middleware,
+прямые контракты сервисных функций и централизованную обработку доменных исключений.
 """
 
 from datetime import UTC, datetime
@@ -16,6 +16,7 @@ from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
 from app.core.exceptions import DomainError
 from app.main import app
 from app.models.event import Event
+from app.services.event_service import list_events_in_range
 
 
 def build_mock_event(**kwargs) -> Event:
@@ -218,6 +219,59 @@ async def test_get_events_in_range_invalid_category(
         "/api/v1/events/range?from_date=0&to_date=1000&categories=religion"
     )
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@pytest.mark.unit
+async def test_get_events_in_range_invalid_rank(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка валидации рангов в запросе выборки по диапазону GET /api/v1/events/range.
+    Передача неизвестного значения ранга отклоняется на уровне FastAPI со статусом 422.
+    """
+    response = await async_client.get(
+        "/api/v1/events/range?from_date=0&to_date=1000&ranks=invalid_rank"
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    data = response.json()
+    assert isinstance(data.get("detail"), list)
+    # Проверка фиксации ошибки валидации в поле ranks
+    assert any("ranks" in str(err.get("loc", [])) for err in data["detail"])
+
+
+@pytest.mark.unit
+async def test_get_events_in_range_multiple_ranks_delegation(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка делегирования множественных параметров ranks в сервисный слой в виде списка строк.
+    Валидирует статус 200 OK, вызов list_events_in_range и передачу регламентированных аргументов.
+    """
+    with patch(
+        "app.api.endpoints.events.list_events_in_range",
+        new_callable=AsyncMock,
+    ) as mock_list_events:
+        mock_list_events.return_value = []
+
+        # Запрос с передачей двух повторяющихся параметров ranks
+        response = await async_client.get(
+            "/api/v1/events/range?from_date=0&to_date=1000&ranks=century&ranks=year"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == []
+
+        # Проверка одиночного вызова сервисного метода и значений переданных именованных параметров
+        mock_list_events.assert_awaited_once()
+        kwargs = mock_list_events.call_args.kwargs
+        assert kwargs.get("ranks") == ["century", "year"]
+        assert kwargs.get("from_date") == 0
+        assert kwargs.get("to_date") == 1000
+        assert kwargs.get("categories") is None
+        assert kwargs.get("status") == EventStatus.APPROVED.value
+        assert kwargs.get("skip") == 0
+        assert kwargs.get("limit") == 500
 
 
 @pytest.mark.unit
@@ -595,3 +649,53 @@ async def test_unhandled_exception_returns_500_without_traceback(
     data = response.json()
     assert data == {"detail": "Внутренняя ошибка сервера."}
     assert "Непредвиденный сбой ядра" not in response.text
+
+
+@pytest.mark.unit
+async def test_service_list_events_in_range_invalid_rank_raises_domain_error() -> None:
+    """
+    Проверка прямой контрактной валидации недопустимых рангов в сервисном слое.
+    При передаче неизвестного значения ранга ('era') функция обязана выбросить DomainError
+    до выполнения запроса к базе данных, не затрагивая сессию СУБД.
+    """
+    # Создание изолированного мока асинхронной сессии базы данных
+    mock_session = AsyncMock()
+
+    # Проверка возбуждения доменного исключения при передаче некорректного ранга
+    with pytest.raises(DomainError) as exc_info:
+        await list_events_in_range(
+            session=mock_session,
+            from_date=0,
+            to_date=1000,
+            ranks=["year", "era"],
+        )
+
+    # Верификация наличия имени недопустимого ранга в сообщении об ошибке
+    assert "era" in str(exc_info.value)
+
+    # Подтверждение отсутствия обращений к методам выполнения запросов базы данных
+    mock_session.execute.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_service_list_events_in_range_empty_ranks_returns_empty_list() -> None:
+    """
+    Проверка раннего возврата сервисного слоя при передаче пустого набора рангов.
+    При ranks=[] функция обязана немедленно вернуть пустой список без выполнения SQL-запроса.
+    """
+    # Создание изолированного мока асинхронной сессии базы данных
+    mock_session = AsyncMock()
+
+    # Выполнение сервисного вызова с пустым списком рангов
+    result = await list_events_in_range(
+        session=mock_session,
+        from_date=0,
+        to_date=1000,
+        ranks=[],
+    )
+
+    # Проверка возврата пустого результата
+    assert result == []
+
+    # Подтверждение, что SQL-запрос к базе данных не отправлялся
+    mock_session.execute.assert_not_called()

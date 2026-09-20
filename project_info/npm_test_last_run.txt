@@ -1,19 +1,21 @@
-
-> history-timeline-frontend@1.0.0 test
-> vitest run
-
+npm notice run history-timeline-frontend@1.0.0 test
+npm notice run vitest run
 
  RUN  v3.2.7 C:/history_timeline
 
- ✓ tests/js/scale.test.js (14 tests) 4ms
- ✓ tests/js/calendar.test.js (24 tests) 7ms
- ✓ tests/js/viewport.test.js (34 tests) 9ms
- ✓ tests/js/ticks.test.js (14 tests) 18ms
- ✓ tests/js/format.test.js (14 tests) 26ms
- ✓ tests/js/controller.test.js (5 tests) 3ms
+ ✓ tests/js/rankMapping.test.js (22 tests) 6ms
+ ✓ tests/js/loadWindow.test.js (20 tests) 7ms
+ ✓ tests/js/calendar.test.js (24 tests) 13ms
+ ✓ tests/js/scale.test.js (14 tests) 11ms
+ ✓ tests/js/markers.test.js (20 tests) 12ms
+ ✓ tests/js/viewport.test.js (34 tests) 19ms
+ ✓ tests/js/eventStore.test.js (13 tests) 27ms
+ ✓ tests/js/format.test.js (14 tests) 36ms
+ ✓ tests/js/ticks.test.js (14 tests) 22ms
+ ✓ tests/js/controller.test.js (5 tests) 5ms
 
- Test Files  6 passed (6)
-      Tests  105 passed (105)
-   Start at  20:39:23
-   Duration  533ms (transform 222ms, setup 0ms, collect 569ms, tests 67ms, environment 1ms, prepare 827ms)
+ Test Files  10 passed (10)
+      Tests  180 passed (180)
+   Start at  20:24:31
+   Duration  618ms (transform 352ms, setup 0ms, collect 1.17s, tests 157ms, environment 2ms, prepare 1.44s)
 
