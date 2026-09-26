@@ -16,6 +16,9 @@ from app.core.exceptions import (
     InvalidParentRankError,
 )
 from app.crud.event import (
+    count_events_by_parent_id as crud_count_events_by_parent_id,
+)
+from app.crud.event import (
     create_event as crud_create_event,
 )
 from app.crud.event import (
@@ -34,6 +37,9 @@ from app.crud.event import (
     get_events_in_range as crud_get_events_in_range,
 )
 from app.crud.event import (
+    get_first_child_with_depth_at_most as crud_get_first_child_with_depth_at_most,
+)
+from app.crud.event import (
     update_event as crud_update_event,
 )
 from app.models.event import Event
@@ -48,7 +54,9 @@ async def create_event(
     Создание нового исторического события с валидацией иерархии предков.
 
     Перед сохранением выполняется валидация существования родителя (если указан parent_id)
-    и проверка отношения масштабов детализации (ранг родителя обязан быть строго крупнее).
+    строго со статусом approved и проверка отношения масштабов детализации (ранг родителя
+    обязан быть строго крупнее). Если родитель не найден или ожидает модерации, выбрасывается
+    EventNotFoundError, что исключает утечку метаданных о немодерированных ветках.
     Начальный статус модерации 'pending' явно передается в слой данных до выполнения
     SQL INSERT, что гарантирует конструирование сущности с обязательным полем status,
     предотвращает генерацию вторичного оператора UPDATE и рассинхронизацию меток времени
@@ -57,12 +65,16 @@ async def create_event(
     :param session: Активная асинхронная сессия SQLAlchemy.
     :param event_in: Валидированные входные данные создания события.
     :return: Созданный экземпляр ORM-модели Event со статусом pending.
-    :raises EventNotFoundError: Если указанный parent_id не найден в базе данных.
+    :raises EventNotFoundError: Если указанный parent_id не найден или не одобрен.
     :raises InvalidParentRankError: Если ранг родительского события не строго крупнее дочернего.
     """
     # Проверка наличия и иерархической корректности родительского события
     if event_in.parent_id is not None:
-        parent = await crud_get_event_by_id(session, event_in.parent_id)
+        parent = await crud_get_event_by_id(
+            session,
+            event_in.parent_id,
+            status=EventStatus.APPROVED.value,
+        )
         if parent is None:
             raise EventNotFoundError(event_in.parent_id)
 
@@ -85,19 +97,77 @@ async def create_event(
 async def get_event(
     session: AsyncSession,
     event_id: int,
+    require_approved: bool = True,
 ) -> Event:
     """
     Получение исторического события по его первичному ключу.
 
+    По умолчанию требует наличия подтвержденного статуса модерации (approved)
+    для безопасной публичной выдачи. При отсутствии записи или несоответствии
+    статусу возбуждается доменное исключение EventNotFoundError, транслируемое
+    на уровне HTTP в статус 404 Not Found, что исключает утечку информации
+    о существовании немодерированных или отклоненных событий.
+
     :param session: Активная асинхронная сессия SQLAlchemy.
     :param event_id: Уникальный идентификатор исторического события.
+    :param require_approved: Флаг требования одобренного статуса модерации (по умолчанию True).
     :return: Экземпляр ORM-модели Event.
-    :raises EventNotFoundError: Если событие с указанным ID отсутствует в базе данных.
+    :raises EventNotFoundError: Если событие с указанным ID отсутствует в базе данных
+        или не соответствует требуемому статусу модерации.
     """
-    event = await crud_get_event_by_id(session, event_id)
+    # Определение строкового фильтра статуса для слоя доступа к данным
+    status_filter = EventStatus.APPROVED.value if require_approved else None
+
+    # Запрос сущности из базы данных с опциональным фильтром статуса
+    event = await crud_get_event_by_id(session, event_id, status=status_filter)
     if event is None:
         raise EventNotFoundError(event_id)
     return event
+
+
+async def list_event_children(
+    session: AsyncSession,
+    event_id: int,
+    skip: int = 0,
+    limit: int = 100,
+) -> tuple[Sequence[Event], int]:
+    """
+    Получение списка одобренных дочерних событий и их общего количества для указанного родителя.
+
+    Перед выборкой проверяет существование и доступность родительского события
+    (require_approved=True). Если родитель отсутствует или не имеет статуса
+    approved, выбрасывается EventNotFoundError(event_id).
+    Выборка потомков строго ограничена одобренным контентом (status='approved'),
+    отсортирована хронологически и поддерживает пагинацию через skip и limit.
+
+    :param session: Активная асинхронная сессия SQLAlchemy.
+    :param event_id: Уникальный идентификатор родительского события.
+    :param skip: Смещение пагинации.
+    :param limit: Максимальное количество возвращаемых дочерних записей.
+    :return: Кортеж из последовательности одобренных дочерних событий Event
+             и общего количества подтвержденных потомков (total).
+    :raises EventNotFoundError: Если родительское событие не найдено или не одобрено.
+    """
+    # 1. Валидация существования и одобренного статуса родительского события
+    await get_event(session=session, event_id=event_id, require_approved=True)
+
+    # 2. Выборка страницы одобренных дочерних событий со смещением и лимитом
+    items = await crud_get_events_by_parent_id(
+        session=session,
+        parent_id=event_id,
+        status=EventStatus.APPROVED.value,
+        skip=skip,
+        limit=limit,
+    )
+
+    # 3. Подсчет общего количества одобренных дочерних событий
+    total = await crud_count_events_by_parent_id(
+        session=session,
+        parent_id=event_id,
+        status=EventStatus.APPROVED.value,
+    )
+
+    return items, total
 
 
 async def list_events(
@@ -138,9 +208,14 @@ async def list_events_in_range(
     """
     Выборка событий в заданном временном диапазоне с валидацией границ и уровней детализации.
 
-    Ограничение выборки по параметру ranks фильтрует события теми уровнями детализации,
-    которые соответствуют текущему масштабу отображения таймлайна на клиенте.
-    Визуальное прореживание плотности маркеров на экране относится к шагу 3 дорожной карты.
+    Особенности выборки:
+    - Усечение результирующей выборки на уровне базы данных выполняется по важности (depth_level),
+      хронологической длительности, детерминированному псевдослучайному хэш-ключу Кнута и первичному
+      ключу id при достижении лимита выборки, что исключает мерцание маркеров при панорамировании;
+    - Каждая возвращаемая сущность Event содержит вычисленный атрибут collapsed_children_count
+      (количество скрытых текущим масштабом прямых подтвержденных потомков);
+    - Ограничение выборки по параметру ranks фильтрует события теми уровнями детализации,
+      которые соответствуют текущему масштабу отображения таймлайна на клиенте.
 
     :param session: Активная асинхронная сессия SQLAlchemy.
     :param from_date: Начальная временная метка диапазона (в секундах).
@@ -150,7 +225,7 @@ async def list_events_in_range(
     :param status: Статус модерации события.
     :param skip: Смещение пагинации.
     :param limit: Лимит выборки событий.
-    :return: Последовательность найденных событий.
+    :return: Последовательность найденных событий с заполненным collapsed_children_count.
     :raises InvalidDateRangeError: Если to_date меньше from_date.
     :raises DomainError: Если в переданном наборе ranks присутствует неизвестный ранг.
     """
@@ -198,10 +273,11 @@ async def update_event(
 
     Бизнес-правила валидации иерархии:
     1. Проверка циклических ссылок: событие не может указывать само себя в качестве родителя;
-    2. Случай А: при смене parent_id ранг выбранного родителя обязан быть строго крупнее ранга события;
+    2. Случай А: при смене parent_id ранг выбранного родителя обязан быть строго крупнее ранга события.
+       Родитель ищется строго со статусом approved во избежание утечки приватных веток;
     3. Случай Б: при сохранении родителя и смене ранга новый ранг обязан оставаться строго мельче ранга родителя;
-    4. Случай В: при смене ранга проверяются все существующие дочерние узлы. Новый ранг родителя обязан
-       оставаться строго крупнее ранга любого существующего потомка во избежание инверсии иерархии.
+    4. Случай В: при смене ранга проверяются существующие дочерние узлы через get_first_child_with_depth_at_most.
+       Новый ранг родителя обязан оставаться строго крупнее ранга любого существующего потомка.
 
     :param session: Активная асинхронная сессия SQLAlchemy.
     :param event_id: Идентификатор обновляемого события.
@@ -211,7 +287,7 @@ async def update_event(
     :raises InvalidDateRangeError: Если новая дата окончания меньше даты начала.
     :raises InvalidParentRankError: Если нарушена иерархия рангов или событие ссылается на себя.
     """
-    # Получение текущего состояния сущности из базы данных
+    # Получение текущего состояния сущности из базы данных напрямую без фильтрации по статусу
     db_event = await crud_get_event_by_id(session, event_id)
     if db_event is None:
         raise EventNotFoundError(event_id)
@@ -245,7 +321,11 @@ async def update_event(
                     "Событие не может быть родительским по отношению к самому себе."
                 )
 
-            parent = await crud_get_event_by_id(session, event_in.parent_id)
+            parent = await crud_get_event_by_id(
+                session,
+                event_in.parent_id,
+                status=EventStatus.APPROVED.value,
+            )
             if parent is None:
                 raise EventNotFoundError(event_in.parent_id)
 
@@ -258,6 +338,9 @@ async def update_event(
 
     # Случай Б: parent_id не изменяется, но изменяется ранг при существующем родителе
     elif "rank" in event_in.model_fields_set and db_event.parent_id is not None:
+        # Инвариант иерархии проверяется относительно уже привязанного родителя любого статуса
+        # (включая pending), так как связь уже зафиксирована в базе данных, и изменение
+        # собственного ранга не должно нарушать дерево, даже если родитель ожидает проверки модератором.
         parent = await crud_get_event_by_id(session, db_event.parent_id)
         if parent and EventRank(parent.rank).depth_level() >= target_rank.depth_level():
             raise InvalidParentRankError(
@@ -267,13 +350,16 @@ async def update_event(
 
     # Случай В: валидация отношения масштабов с существующими дочерними событиями при изменении ранга
     if "rank" in event_in.model_fields_set and event_in.rank is not None:
-        children = await crud_get_events_by_parent_id(session, parent_id=event_id)
-        for child in children:
-            if EventRank(child.rank).depth_level() <= target_rank.depth_level():
-                raise InvalidParentRankError(
-                    f"Ранг обновляемого события '{target_rank.value}' не может быть равен "
-                    f"или мельче ранга существующего дочернего события с ID {child.id} ('{child.rank}')."
-                )
+        conflicting_child = await crud_get_first_child_with_depth_at_most(
+            session,
+            parent_id=event_id,
+            max_depth_level=target_rank.depth_level(),
+        )
+        if conflicting_child is not None:
+            raise InvalidParentRankError(
+                f"Ранг обновляемого события '{target_rank.value}' не может быть равен "
+                f"или мельче ранга существующего дочернего события с ID {conflicting_child.id} ('{conflicting_child.rank}')."
+            )
 
     # Передача проверенных изменений в слой базы данных
     return await crud_update_event(session, db_event=db_event, event_in=event_in)
@@ -297,11 +383,12 @@ async def delete_event(
     await crud_delete_event(session, db_event=db_event)
 
 
-# Явное декларирование публичного интерфейса сервисного слоя
+# Явное декларирование публичного интерфейса сервисного слоя в алфавитном порядке
 __all__: list[str] = [
     "create_event",
     "delete_event",
     "get_event",
+    "list_event_children",
     "list_events",
     "list_events_in_range",
     "update_event",

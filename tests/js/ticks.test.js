@@ -6,9 +6,9 @@
  * буфера упреждения и выравнивание дохристианских дат по историческим годам до н. э.
  *
  * СИСТЕМНЫЕ ПРАВИЛА:
- * 1. Исполнение в изолированной среде Node.js под управлением Vitest без DOM и Canvas[cite: 23].
- * 2. Импорт модулей ядра осуществляется с подъемом на два уровня (../../frontend/js/timeline/...)[cite: 23].
- * 3. Жесткая гарантия производительности: не более 120 тиков на стандартных экранах и не более 200 на 4K[cite: 23].
+ * 1. Исполнение в изолированной среде Node.js под управлением Vitest без DOM и Canvas.
+ * 2. Импорт модулей ядра осуществляется с подъемом на два уровня (../../frontend/js/timeline/...).
+ * 3. Жесткая гарантия производительности: не более 120 тиков на стандартных экранах и не более 200 на 4K.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -31,12 +31,12 @@ import { timestampToCivil } from '../../frontend/js/timeline/calendar.js';
 
 describe('constants synchronization with backend', () => {
     it('проверяет нижнюю границу шкалы платформы TIMELINE_MIN_TIMESTAMP', () => {
-        // Первоисточник: app/core/constants.py -> TIMELINE_MIN_TIMESTAMP (-1 000 000 лет)[cite: 23]
+        // Первоисточник: app/core/constants.py -> TIMELINE_MIN_TIMESTAMP (-1 000 000 лет)
         expect(TIMELINE_MIN_TIMESTAMP).toBe(-31557600000000);
     });
 
     it('проверяет верхнюю границу шкалы платформы TIMELINE_MAX_TIMESTAMP', () => {
-        // Первоисточник: app/core/constants.py -> TIMELINE_MAX_TIMESTAMP (3000-01-01)[cite: 23]
+        // Первоисточник: app/core/constants.py -> TIMELINE_MAX_TIMESTAMP (3000-01-01)
         expect(TIMELINE_MAX_TIMESTAMP).toBe(32503680000);
     });
 

@@ -202,5 +202,35 @@ describe('loadWindow module', () => {
             const required = { from_date: 200, to_date: 800 };
             expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey)).toBe(false);
         });
+
+        it('возвращает true при усечении выборки и приближении масштаба ровно на 1', () => {
+            const required = { from_date: 200, to_date: 800 };
+            const context = { isTruncated: true, loadedZoomIndex: 10, currentZoomIndex: 9 };
+            expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey, context)).toBe(true);
+        });
+
+        it('возвращает false при усечении выборки и приближении масштаба меньше порога (на 0.5)', () => {
+            const required = { from_date: 200, to_date: 800 };
+            const context = { isTruncated: true, loadedZoomIndex: 10, currentZoomIndex: 9.5 };
+            expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey, context)).toBe(false);
+        });
+
+        it('возвращает false при отсутствии усечения выборки даже при значительном приближении масштаба (на 3)', () => {
+            const required = { from_date: 200, to_date: 800 };
+            const context = { isTruncated: false, loadedZoomIndex: 10, currentZoomIndex: 7 };
+            expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey, context)).toBe(false);
+        });
+
+        it('возвращает false при отдалении масштаба внутри покрытого диапазона', () => {
+            const required = { from_date: 200, to_date: 800 };
+            const context = { isTruncated: true, loadedZoomIndex: 10, currentZoomIndex: 12 };
+            expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey, context)).toBe(false);
+        });
+
+        it('сохраняет стандартное поведение кэширования при явном отсутствии контекста усечения', () => {
+            const required = { from_date: 200, to_date: 800 };
+            expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey, null)).toBe(false);
+            expect(shouldFetchEvents(required, loadedWindow, shapeKey, shapeKey, undefined)).toBe(false);
+        });
     });
 });

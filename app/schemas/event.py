@@ -1,13 +1,20 @@
 """
 Схемы валидации и сериализации исторических событий на базе Pydantic v2.
-Определяет строгие контракты создания (EventCreate), частичного обновления (EventUpdate)
-и сериализации ответа API (EventResponse).
+Определяет строгие контракты создания (EventCreate), частичного обновления (EventUpdate),
+сериализации ответа API (EventResponse), выборки диапазона (EventRangeResponse)
+и страницы дочерних записей (EventChildrenPage).
 """
 
 from datetime import datetime
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.core.constants import TIMELINE_MAX_TIMESTAMP, TIMELINE_MIN_TIMESTAMP
 from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
@@ -342,9 +349,69 @@ class EventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# Декларирование публичного контракта модуля схем событий
+class EventRangeResponse(EventResponse):
+    """
+    Схема ответа API для интервальной выборки событий таймлайна (/events/range).
+
+    Наследует все атрибуты EventResponse и дополняется счетчиком collapsed_children_count,
+    отражающим количество прямых подтвержденных потомков, чей ранг скрыт текущим масштабом.
+    Автоматически нормализует значение None в 0 для сущностей, инстанцированных вне подзапроса.
+    """
+
+    collapsed_children_count: int = Field(
+        default=0,
+        ge=0,
+        description="Количество скрытых текущим масштабом прямых дочерних событий",
+    )
+
+    @field_validator("collapsed_children_count", mode="before")
+    @classmethod
+    def normalize_collapsed_count(cls, value: object) -> object:
+        """
+        Преобразует None в 0 для безопасной валидации ORM-объектов,
+        у которых атрибут collapsed_children_count не был загружен через with_expression.
+        """
+        if value is None:
+            return 0
+        return value
+
+
+class EventChildrenPage(BaseModel):
+    """
+    Схема ответа API для постраничной выдачи списка дочерних исторических событий (/events/{event_id}/children).
+
+    Содержит список элементов страницы, общее количество подтвержденных потомков родительского события
+    и параметры пагинации (смещение и лимит).
+    """
+
+    items: list[EventResponse] = Field(
+        default_factory=list,
+        description="Список дочерних исторических событий",
+    )
+    total: int = Field(
+        ...,
+        ge=0,
+        description="Общее количество подтвержденных дочерних событий",
+    )
+    skip: int = Field(
+        default=0,
+        ge=0,
+        description="Количество пропущенных записей",
+    )
+    limit: int = Field(
+        default=100,
+        ge=1,
+        description="Предельный размер страницы выборки",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Декларирование публичного контракта модуля схем событий в алфавитном порядке
 __all__: list[str] = [
+    "EventChildrenPage",
     "EventCreate",
+    "EventRangeResponse",
     "EventResponse",
     "EventUpdate",
 ]

@@ -1,7 +1,7 @@
 """
 Интеграционные тесты уровня репозитория и целостности реляционной схемы таблицы events.
 Проверяет аппаратные ограничения CheckConstraint PostgreSQL 18, корректность
-вычисления колонки end_date_effective и каскадное поведение внешнего ключа parent_id.
+вычисления колонок end_date_effective и depth_level, а также каскадное поведение внешнего ключа parent_id.
 """
 
 import pytest
@@ -263,3 +263,73 @@ async def test_cascade_set_null_parent_id_on_parent_deletion(
     # Запись потомка должна существовать, а parent_id сброшен в None внешним ключом СУБД
     assert updated_child is not None
     assert updated_child.parent_id is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rank", list(EventRank))
+async def test_computed_column_depth_level_all_ranks(
+    db_session: AsyncSession,
+    rank: EventRank,
+) -> None:
+    """
+    Проверка корректности материализации вычисляемой колонки depth_level
+    для всех восьми рангов перечисления EventRank.
+    """
+    # 1. Создание события с целевым рангом
+    event = make_base_event(
+        title=f"Тест ранга {rank.value}",
+        rank=rank.value,
+    )
+    db_session.add(event)
+    await db_session.flush()
+
+    event_id = event.id
+
+    # 2. Очистка кэша сессии для гарантии чтения с диска СУБД
+    db_session.expunge_all()
+
+    # 3. Повторная выборка сохраненного события
+    statement = select(Event).where(Event.id == event_id)
+    result = await db_session.execute(statement)
+    db_event = result.scalar_one()
+
+    # 4. Значение depth_level обязано строго совпадать с рангом в доменной модели
+    assert db_event.depth_level == rank.depth_level()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_computed_column_depth_level_recalculation_on_rank_update(
+    db_session: AsyncSession,
+) -> None:
+    """
+    Проверка динамического пересчета материализованной колонки depth_level
+    на уровне СУБД PostgreSQL при обновлении атрибута rank.
+    """
+    # 1. Создание события с исходным рангом year (depth_level = 2)
+    event = make_base_event(
+        title="Пересчет ранга",
+        rank=EventRank.YEAR.value,
+    )
+    db_session.add(event)
+    await db_session.flush()
+
+    event_id = event.id
+
+    # 2. Мутация поля rank на century (depth_level = 0) и отправка UPDATE в PostgreSQL
+    event.rank = EventRank.CENTURY.value
+    await db_session.flush()
+
+    # 3. Очистка Identity Map сессии для принудительного повторного чтения строки из таблицы
+    db_session.expunge_all()
+
+    # 4. Повторная выборка сущности
+    statement = select(Event).where(Event.id == event_id)
+    result = await db_session.execute(statement)
+    updated_event = result.scalar_one()
+
+    # 5. Проверка актуализации ранга и пересчитанного базой данных depth_level
+    assert updated_event.rank == EventRank.CENTURY.value
+    assert updated_event.depth_level == EventRank.CENTURY.depth_level()
+    assert updated_event.depth_level == 0

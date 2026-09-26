@@ -112,7 +112,7 @@ body {
 .timeline-container {
     position: relative;
     width: 100%;
-    height: 320px;
+    height: 440px;
     overflow: hidden;
     background-color: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -210,4 +210,200 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--text-secondary);
+}
+
+/* ==============================================================================
+   БОКОВАЯ ПАНЕЛЬ ДЕТАЛИЗАЦИИ СОБЫТИЯ (DETAIL PANEL)
+   ============================================================================== */
+
+/* Корневой контейнер боковой панели с абсолютным позиционированием справа */
+.timeline-detail-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 320px;
+    background-color: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -4px 0 12px var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 10;
+    padding: 1.25rem;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+/* Скрытие панели по умолчанию */
+.timeline-detail-panel.hidden {
+    display: none;
+}
+
+/* Шапка панели: заголовок и кнопка закрытия */
+.timeline-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Типографика названия события */
+.timeline-detail-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+/* Кнопка закрытия боковой панели */
+.timeline-detail-close-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1.25rem;
+    line-height: 1;
+    padding: 0.25rem;
+    border-radius: 4px;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+/* Состояние наведения на кнопку закрытия */
+.timeline-detail-close-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-accent);
+}
+
+/* Хронологический диапазон дат события */
+.timeline-detail-dates {
+    font-size: 0.85rem;
+    font-family: monospace;
+    color: var(--color-accent);
+    margin-bottom: 0.75rem;
+}
+
+/* Контейнер бейджей метаданных */
+.timeline-detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+/* Компактный бейдж категории и ранга */
+.timeline-detail-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 4px;
+    background-color: var(--bg-accent);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    text-transform: uppercase;
+}
+
+/* Текстовый блок описания события */
+.timeline-detail-description {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    line-height: 1.5;
+    margin-bottom: 1rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Первоисточник данных */
+.timeline-detail-source {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.25rem;
+    font-style: italic;
+    word-break: break-all;
+}
+
+/* Секция иерархических потомков */
+.timeline-detail-children {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Заголовок секции потомков */
+.timeline-detail-children-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+/* Информационный счетчик отображаемых дочерних событий */
+.timeline-detail-children-count {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+/* Список дочерних событий */
+.timeline-detail-children-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+/* Интерактивный элемент списка дочернего события */
+.timeline-detail-child-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background-color: var(--bg-accent);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.825rem;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+/* Наведение на элемент дочернего события */
+.timeline-detail-child-item:hover {
+    border-color: var(--color-accent);
+    background-color: var(--border-color);
+}
+
+/* Заголовок дочернего события */
+.timeline-detail-child-title {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Даты дочернего события */
+.timeline-detail-child-dates {
+    color: var(--text-secondary);
+    font-family: monospace;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+/* Диагностический блок статуса загрузки карточки */
+.timeline-detail-status {
+    padding: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+/* Блок предупреждения об ошибке загрузки потомков */
+.timeline-detail-children-error {
+    font-size: 0.8rem;
+    color: var(--color-category-politics);
+    margin-top: 0.5rem;
 }

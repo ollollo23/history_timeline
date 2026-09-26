@@ -13,12 +13,13 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, query_expression
 
 from app.core.constants import TIMELINE_MAX_TIMESTAMP, TIMELINE_MIN_TIMESTAMP
 from app.core.enums import CalendarSystem, EventRank, EventStatus
@@ -34,6 +35,8 @@ class Event(Base):
     - Точечные и интервальные события с автоматическим расчетом эффективного окончания.
     - Вычисляемую колонку end_date_effective: материализованное значение COALESCE(end_date, start_date),
       позволяющее эффективно фильтровать события по условию пересечения отрезков времени.
+    - Хранимую вычисляемую колонку depth_level для ранжирования важности и серверного контроля иерархии.
+    - Динамический атрибут collapsed_children_count для свертки скрытых потомков.
     - Иерархическую вложенность событий через parent_id для группировки по масштабам шкалы.
     - Аудит жизненного цикла записей с автоматической фиксацией времени создания и обновления.
     """
@@ -168,6 +171,27 @@ class Event(Base):
         server_default=EventRank.YEAR.value,
     )
 
+    # Хранимая вычисляемая колонка числового уровня детализации (0 для century, ..., 7 для second).
+    # Колонка объявлена как nullable=True для сохранения приоритета диагностического
+    # срабатывания проверочного ограничения ck_events_rank_allowed при попытке вставки невалидного ранга.
+    depth_level: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        Computed(
+            f"CASE rank "
+            f"WHEN '{EventRank.CENTURY.value}' THEN {EventRank.CENTURY.depth_level()} "
+            f"WHEN '{EventRank.DECADE.value}' THEN {EventRank.DECADE.depth_level()} "
+            f"WHEN '{EventRank.YEAR.value}' THEN {EventRank.YEAR.depth_level()} "
+            f"WHEN '{EventRank.MONTH.value}' THEN {EventRank.MONTH.depth_level()} "
+            f"WHEN '{EventRank.DAY.value}' THEN {EventRank.DAY.depth_level()} "
+            f"WHEN '{EventRank.HOUR.value}' THEN {EventRank.HOUR.depth_level()} "
+            f"WHEN '{EventRank.MINUTE.value}' THEN {EventRank.MINUTE.depth_level()} "
+            f"WHEN '{EventRank.SECOND.value}' THEN {EventRank.SECOND.depth_level()} "
+            f"END",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
     # Внешний ключ на родительское макро-событие для реализации древовидной группировки
     # При удалении родительского события дочерние записи сохраняются с обнулением parent_id
     parent_id: Mapped[int | None] = mapped_column(
@@ -175,6 +199,11 @@ class Event(Base):
         ForeignKey("events.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    # Динамический атрибут количества свернутых дочерних событий.
+    # Не создает колонку в таблице базы данных и заполняется через with_expression
+    # только в запросе интервальной выборки.
+    collapsed_children_count: Mapped[int | None] = query_expression()
 
     # Библиографический источник или ссылка на подтверждающий исторический факт
     source: Mapped[str | None] = mapped_column(

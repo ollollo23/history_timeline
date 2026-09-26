@@ -2,7 +2,7 @@
  * Модуль представления домашней страницы (главный экран таймлайна).
  * Реализует контракт жизненного цикла SPA-представлений платформы History Timeline:
  * декларативную HTML-разметку, фазу монтирования (mount) с инициализацией контроллера Canvas
- * и фазу демонтирования (unmount) с полной очисткой системных ресурсов.
+ * и боковой панели детализации, а также фазу демонтирования (unmount) с полной очисткой ресурсов.
  */
 
 import { createTimelineController } from '../timeline/controller.js';
@@ -11,6 +11,7 @@ import {
     calculateVisibleDuration,
 } from '../timeline/scale.js';
 import { formatContextInterval } from '../timeline/format.js';
+import { createDetailPanel } from '../components/detailPanel.js';
 
 /**
  * Форматирование понятного текстового описания текущего масштаба времени на пиксель экрана.
@@ -51,11 +52,16 @@ function formatScaleInfo(spp) {
 export function renderHome() {
     // Локализованные переменные состояния экземпляра экрана для предотвращения утечек памяти
     let timelineController = null;
+    let detailPanel = null;
     let resetClickListener = null;
     let savedResetBtnElement = null;
     let statusRafId = null;
     let pendingViewportState = null;
     let pendingStoreState = null;
+    let pendingSelectionState = null;
+
+    // Ссылка на последний примененный слепок выбора для предотвращения избыточных DOM-мутаций
+    let lastAppliedSelectionState = null;
 
     const html = `
         <section class="view-card">
@@ -69,7 +75,7 @@ export function renderHome() {
             <div id="api-status" class="api-status-badge">Инициализация соединения с API...</div>
 
             <!-- Рабочий контейнер интерактивного холста временной шкалы -->
-            <div id="timeline-container" class="timeline-container" style="position: relative; width: 100%; height: 320px; overflow: hidden; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; margin-top: 1.5rem;">
+            <div id="timeline-container" class="timeline-container" style="position: relative; width: 100%; height: 440px; overflow: hidden; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; margin-top: 1.5rem;">
                 <canvas id="timeline-canvas" style="display: block; width: 100%; height: 100%; cursor: grab; outline: none;"></canvas>
             </div>
 
@@ -89,7 +95,7 @@ export function renderHome() {
 
     /**
      * Фаза монтирования: вызывается маршрутизатором после вставки разметки в DOM.
-     * Инициализирует интерактивный контроллер таймлайна и привязывает обработчики событий.
+     * Инициализирует интерактивный контроллер таймлайна, панель деталей и обработчики событий.
      *
      * @param {HTMLElement} [container] Корневой элемент монтирования представления.
      */
@@ -114,13 +120,29 @@ export function renderHome() {
         // Сохранение ссылки на кнопку сброса для безопасного снятия слушателя в unmount
         savedResetBtnElement = resetBtnElement;
 
+        // Инициализация компонента боковой панели детализации с передачей обработчиков
+        detailPanel = createDetailPanel(containerElement, {
+            onClose: () => {
+                if (timelineController && typeof timelineController.clearSelection === 'function') {
+                    timelineController.clearSelection();
+                }
+            },
+            onSelectChild: (child) => {
+                // Плавная фокусировка камеры на выбранном дочернем событии
+                if (timelineController && child && typeof timelineController.focusEvent === 'function') {
+                    timelineController.focusEvent(child);
+                }
+            },
+        });
+
         /**
-         * Синхронное применение данных состояния камеры и хранилища к DOM-элементам тулбара.
+         * Синхронное применение данных состояния камеры, хранилища и выбора к элементам интерфейса.
          *
          * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>|null} viewportState
          * @param {Readonly<{status: string, isTruncated: boolean, events: Array<Object>}>|null} storeState
+         * @param {Readonly<{selectedId: number|null, event: Object|null, children: Array<Object>, childrenTotal: number, status: string, error: Error|null, childrenError: Error|null}>|null} [selectionState]
          */
-        const applyStatusUpdate = (viewportState, storeState) => {
+        const applyStatusUpdate = (viewportState, storeState, selectionState) => {
             // 1. Обновление диапазона и масштаба камеры
             if (viewportState && rangeInfoElement && scaleInfoElement) {
                 const spp = zoomIndexToSecondsPerPixel(viewportState.zoomIndex);
@@ -163,19 +185,46 @@ export function renderHome() {
                         : 'none';
                 }
             }
+
+            // 3. Синхронизация состояния боковой панели детализации с защитой от повторного рендеринга
+            if (selectionState && detailPanel) {
+                if (selectionState !== lastAppliedSelectionState) {
+                    lastAppliedSelectionState = selectionState;
+
+                    if (selectionState.status === 'loading') {
+                        detailPanel.showLoading();
+                    } else if (selectionState.status === 'error') {
+                        detailPanel.showError(selectionState.error);
+                    } else if (selectionState.status === 'idle') {
+                        if (selectionState.event) {
+                            detailPanel.render(
+                                selectionState.event,
+                                selectionState.children,
+                                selectionState.childrenError,
+                                selectionState.childrenTotal
+                            );
+                        } else {
+                            detailPanel.hide();
+                        }
+                    }
+                }
+            }
         };
 
         /**
-         * Пакетное обновление тулбара с планированием через requestAnimationFrame.
-         * Предотвращает множественные синхронные пересчеты стилей и разметки при панорамировании.
+         * Пакетное обновление тулбара и панели с планированием через requestAnimationFrame.
          *
          * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>} viewportState
          * @param {Readonly<{status: string, isTruncated: boolean, events: Array<Object>}>} [storeState]
+         * @param {Readonly<{selectedId: number|null, event: Object|null, children: Array<Object>, childrenTotal: number, status: string, error: Error|null, childrenError: Error|null}>} [selectionState]
          */
-        const updateStatus = (viewportState, storeState) => {
+        const updateStatus = (viewportState, storeState, selectionState) => {
             pendingViewportState = viewportState;
             if (storeState) {
                 pendingStoreState = storeState;
+            }
+            if (selectionState) {
+                pendingSelectionState = selectionState;
             }
 
             // Если кадр уже запланирован, пропускаем повторный вызов
@@ -185,20 +234,36 @@ export function renderHome() {
 
             statusRafId = requestAnimationFrame(() => {
                 statusRafId = null;
-                applyStatusUpdate(pendingViewportState, pendingStoreState);
+                applyStatusUpdate(
+                    pendingViewportState,
+                    pendingStoreState,
+                    pendingSelectionState
+                );
             });
         };
 
         // Создание контроллера интерактивного взаимодействия с холстом
-        timelineController = createTimelineController(canvasElement, containerElement, updateStatus);
+        timelineController = createTimelineController(
+            canvasElement,
+            containerElement,
+            updateStatus
+        );
 
-        // Первичное заполнение индикаторов статуса текущим состоянием камеры и хранилища
+        // Первичное заполнение индикаторов статуса текущим состоянием камеры, хранилища и выбора
         if (timelineController && typeof timelineController.getState === 'function') {
             const initialStoreState =
                 typeof timelineController.getStoreState === 'function'
                     ? timelineController.getStoreState()
                     : null;
-            applyStatusUpdate(timelineController.getState(), initialStoreState);
+            const initialSelectionState =
+                typeof timelineController.getSelectionState === 'function'
+                    ? timelineController.getSelectionState()
+                    : null;
+            applyStatusUpdate(
+                timelineController.getState(),
+                initialStoreState,
+                initialSelectionState
+            );
         }
 
         // Привязка кнопки сброса положения камеры к начальным координатам
@@ -223,6 +288,16 @@ export function renderHome() {
             statusRafId = null;
             pendingViewportState = null;
             pendingStoreState = null;
+            pendingSelectionState = null;
+        }
+
+        // Очистка кэшированного слепка выбора
+        lastAppliedSelectionState = null;
+
+        // Уничтожение компонента боковой панели детализации
+        if (detailPanel) {
+            detailPanel.destroy();
+            detailPanel = null;
         }
 
         // Снятие обработчика клика по сохраненной ссылке на кнопку сброса без querySelector
@@ -232,7 +307,7 @@ export function renderHome() {
             savedResetBtnElement = null;
         }
 
-        // Полное уничтожение контроллера таймлайна (Canvas, EventStore, ResizeObserver, EventListeners)
+        // Полное уничтожение контроллера таймлайна (Canvas, EventStore, SelectionStore, ResizeObserver, EventListeners)
         if (timelineController) {
             if (typeof timelineController.destroy === 'function') {
                 timelineController.destroy();

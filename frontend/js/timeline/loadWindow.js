@@ -13,11 +13,15 @@
  *    вещественного originTimestamp и гарантирует покрытие экранного интервала без сужения.
  * 4. Запрашиваемые границы строго ограничиваются хронологическими пределами платформы
  *    TIMELINE_MIN_TIMESTAMP и TIMELINE_MAX_TIMESTAMP.
+ * 5. Политика усеченного окна: при зафиксированном усечении выборки сервером (isTruncated)
+ *    окно сохраняется целиком, а повторный запрос данных инициируется при приближении масштаба
+ *    на величину TRUNCATED_REFETCH_ZOOM_INDEX_DELTA и более.
  */
 
 import {
     TIMELINE_MAX_TIMESTAMP,
     TIMELINE_MIN_TIMESTAMP,
+    TRUNCATED_REFETCH_ZOOM_INDEX_DELTA,
 } from './constants.js';
 import {
     calculateVisibleDuration,
@@ -142,13 +146,16 @@ export function buildRequestShapeKey(ranks, categories) {
  * @param {{ from_date: number, to_date: number }|null} loadedWindow Текущий загруженный диапазон.
  * @param {string} currentShapeKey Ключ формы текущего запроса (фильтры рангов и категорий).
  * @param {string|null} loadedShapeKey Ключ формы ранее загруженного запроса.
+ * @param {{ isTruncated?: boolean, currentZoomIndex?: number, loadedZoomIndex?: number } | null} [truncationContext=null]
+ *        Контекст усечения выборки и масштабов виртуальной камеры.
  * @returns {boolean} True, если требуется выполнить сетевой запрос за данными.
  */
 export function shouldFetchEvents(
     requiredWindow,
     loadedWindow,
     currentShapeKey,
-    loadedShapeKey
+    loadedShapeKey,
+    truncationContext = null
 ) {
     // 1. Первичная инициализация: данные еще ни разу не загружались
     if (!loadedWindow) {
@@ -165,6 +172,18 @@ export function shouldFetchEvents(
         return true;
     }
 
-    // 4. Попадание в кэш: требуемое окно полностью содержится внутри загруженного
+    // 4. Проверка необходимости дозагрузки при усечении: приближение камеры на 1 шаг логарифмического масштаба и более
+    if (
+        truncationContext !== null &&
+        typeof truncationContext === 'object' &&
+        truncationContext.isTruncated === true &&
+        typeof truncationContext.loadedZoomIndex === 'number' &&
+        typeof truncationContext.currentZoomIndex === 'number' &&
+        (truncationContext.loadedZoomIndex - truncationContext.currentZoomIndex) >= TRUNCATED_REFETCH_ZOOM_INDEX_DELTA
+    ) {
+        return true;
+    }
+
+    // 5. Попадание в кэш: требуемое окно полностью содержится внутри загруженного
     return false;
 }

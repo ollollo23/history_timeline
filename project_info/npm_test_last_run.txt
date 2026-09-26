@@ -3,19 +3,24 @@ npm notice run vitest run
 
  RUN  v3.2.7 C:/history_timeline
 
- ✓ tests/js/rankMapping.test.js (22 tests) 6ms
- ✓ tests/js/loadWindow.test.js (20 tests) 7ms
- ✓ tests/js/calendar.test.js (24 tests) 13ms
+ ✓ tests/js/calendar.test.js (24 tests) 17ms
+ ✓ tests/js/rankMapping.test.js (22 tests) 15ms
+ ✓ tests/js/hitTest.test.js (7 tests) 11ms
+ ✓ tests/js/layout.test.js (19 tests) 23ms
+ ✓ tests/js/markers.test.js (21 tests) 14ms
  ✓ tests/js/scale.test.js (14 tests) 11ms
- ✓ tests/js/markers.test.js (20 tests) 12ms
- ✓ tests/js/viewport.test.js (34 tests) 19ms
- ✓ tests/js/eventStore.test.js (13 tests) 27ms
- ✓ tests/js/format.test.js (14 tests) 36ms
- ✓ tests/js/ticks.test.js (14 tests) 22ms
- ✓ tests/js/controller.test.js (5 tests) 5ms
+ ✓ tests/js/loadWindow.test.js (25 tests) 12ms
+ ✓ tests/js/api.test.js (8 tests) 52ms
+ ✓ tests/js/viewport.test.js (34 tests) 23ms
+ ✓ tests/js/format.test.js (27 tests) 54ms
+ ✓ tests/js/eventStore.test.js (15 tests) 49ms
+ ✓ tests/js/focus.test.js (16 tests) 18ms
+ ✓ tests/js/ticks.test.js (14 tests) 39ms
+ ✓ tests/js/selection.test.js (12 tests) 138ms
+ ✓ tests/js/controller.test.js (5 tests) 10ms
 
- Test Files  10 passed (10)
-      Tests  180 passed (180)
-   Start at  20:24:31
-   Duration  618ms (transform 352ms, setup 0ms, collect 1.17s, tests 157ms, environment 2ms, prepare 1.44s)
+ Test Files  15 passed (15)
+      Tests  263 passed (263)
+   Start at  23:51:50
+   Duration  1.42s (transform 1.24s, setup 0ms, collect 4.09s, tests 485ms, environment 5ms, prepare 5.65s)
 

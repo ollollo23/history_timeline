@@ -1,15 +1,25 @@
 """
 Модульные тесты схем валидации и сериализации Pydantic v2.
-Проверяет контракты EventCreate, EventUpdate,
-MediaItem, MediaPayload и HealthResponse без обращения к базе данных.
+Проверяет контракты EventCreate, EventUpdate, EventResponse,
+EventRangeResponse, EventChildrenPage, MediaItem, MediaPayload
+и HealthResponse без обращения к базе данных.
 """
+
+from datetime import datetime
 
 import pytest
 from pydantic import ValidationError
 
 from app.core.constants import TIMELINE_MAX_TIMESTAMP, TIMELINE_MIN_TIMESTAMP
 from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
-from app.schemas.event import EventCreate, EventUpdate
+from app.models.event import Event
+from app.schemas.event import (
+    EventChildrenPage,
+    EventCreate,
+    EventRangeResponse,
+    EventResponse,
+    EventUpdate,
+)
 from app.schemas.health import HealthResponse
 from app.schemas.media import MediaItem, MediaPayload
 
@@ -372,3 +382,151 @@ def test_health_response_invalid_status_literal() -> None:
 
     error_text = str(exc_info.value)
     assert "Input should be 'ok' or 'degraded'" in error_text or "literal_error" in error_text
+
+
+# --- Тестирование схем интервальной выборки и пагинации дочерних записей ---
+
+
+@pytest.mark.unit
+def test_event_range_response_defaults_none_collapsed_count_to_zero() -> None:
+    """
+    Проверка нормализации поля collapsed_children_count в схеме EventRangeResponse.
+    При валидации экземпляра ORM-модели Event (где атрибут равен None)
+    или словаря с явным значением None поле обязано устанавливаться в 0.
+    """
+    now = datetime.now()
+    event = Event(
+        id=1,
+        title="Событие",
+        start_date=1000,
+        end_date=None,
+        category=EventCategory.SCIENCE.value,
+        rank=EventRank.YEAR.value,
+        status=EventStatus.APPROVED.value,
+        calendar_system=CalendarSystem.GREGORIAN_PROLEPTIC.value,
+        created_at=now,
+        updated_at=now,
+    )
+
+    schema = EventRangeResponse.model_validate(event)
+    assert schema.collapsed_children_count == 0
+
+    # Проверка валидации из словаря с явным collapsed_children_count: None
+    payload = {
+        "id": 1,
+        "title": "Событие",
+        "description": None,
+        "start_date": 1000,
+        "end_date": None,
+        "category": EventCategory.SCIENCE.value,
+        "rank": EventRank.YEAR,
+        "parent_id": None,
+        "source": None,
+        "calendar_system": CalendarSystem.GREGORIAN_PROLEPTIC,
+        "media_payload": None,
+        "status": EventStatus.APPROVED,
+        "created_at": now,
+        "updated_at": now,
+        "collapsed_children_count": None,
+    }
+    schema_dict = EventRangeResponse.model_validate(payload)
+    assert schema_dict.collapsed_children_count == 0
+
+
+@pytest.mark.unit
+def test_event_range_response_negative_collapsed_count_raises_error() -> None:
+    """
+    Проверка валидации числовой границы ge=0 для collapsed_children_count:
+    отрицательные значения обязаны вызывать ValidationError.
+    """
+    now = datetime.now()
+    payload = {
+        "id": 1,
+        "title": "Событие",
+        "description": None,
+        "start_date": 1000,
+        "end_date": None,
+        "category": EventCategory.SCIENCE.value,
+        "rank": EventRank.YEAR,
+        "parent_id": None,
+        "source": None,
+        "calendar_system": CalendarSystem.GREGORIAN_PROLEPTIC,
+        "media_payload": None,
+        "status": EventStatus.APPROVED,
+        "created_at": now,
+        "updated_at": now,
+        "collapsed_children_count": -1,
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        EventRangeResponse.model_validate(payload)
+
+    assert "collapsed_children_count" in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_event_children_page_serialization_and_bounds() -> None:
+    """
+    Проверка сериализации страницы дочерних записей EventChildrenPage,
+    типизации элементов items как EventResponse и числовых ограничений total, skip, limit.
+    """
+    now = datetime.now()
+    child1_dict = {
+        "id": 10,
+        "title": "Дочернее событие 1",
+        "description": None,
+        "start_date": 1100,
+        "end_date": None,
+        "category": EventCategory.SCIENCE.value,
+        "rank": EventRank.YEAR,
+        "parent_id": 1,
+        "source": None,
+        "calendar_system": CalendarSystem.GREGORIAN_PROLEPTIC,
+        "media_payload": None,
+        "status": EventStatus.APPROVED,
+        "created_at": now,
+        "updated_at": now,
+    }
+    child2_dict = {
+        "id": 11,
+        "title": "Дочернее событие 2",
+        "description": None,
+        "start_date": 1200,
+        "end_date": None,
+        "category": EventCategory.POLITICS.value,
+        "rank": EventRank.MONTH,
+        "parent_id": 1,
+        "source": None,
+        "calendar_system": CalendarSystem.GREGORIAN_PROLEPTIC,
+        "media_payload": None,
+        "status": EventStatus.APPROVED,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    page_data = {
+        "items": [child1_dict, child2_dict],
+        "total": 10,
+        "skip": 0,
+        "limit": 50,
+    }
+
+    page = EventChildrenPage.model_validate(page_data)
+
+    assert len(page.items) == 2
+    assert all(isinstance(item, EventResponse) for item in page.items)
+    assert page.total == 10
+    assert page.skip == 0
+    assert page.limit == 50
+
+    # Валидация ограничения total >= 0
+    with pytest.raises(ValidationError):
+        EventChildrenPage.model_validate({**page_data, "total": -1})
+
+    # Валидация ограничения skip >= 0
+    with pytest.raises(ValidationError):
+        EventChildrenPage.model_validate({**page_data, "skip": -1})
+
+    # Валидация ограничения limit >= 1 (limit=0 недопустим)
+    with pytest.raises(ValidationError):
+        EventChildrenPage.model_validate({**page_data, "limit": 0})

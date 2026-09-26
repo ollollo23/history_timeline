@@ -172,7 +172,8 @@ async def test_get_events_in_range_success(
 ) -> None:
     """
     Проверка успешного запроса интервальной выборки GET /api/v1/events/range.
-    Валидирует статус 200 OK и работу фильтра по умолчанию (status='approved').
+    Валидирует статус 200 OK, работу фильтра по умолчанию (status='approved')
+    и нормализацию динамического атрибута collapsed_children_count в схеме ответа.
     """
     mock_event = build_mock_event(id=2, status=EventStatus.APPROVED.value)
     mock_result = MagicMock()
@@ -186,6 +187,7 @@ async def test_get_events_in_range_success(
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["id"] == 2
+    assert data[0]["collapsed_children_count"] == 0
     assert mock_db_session.execute.called
 
 
@@ -699,3 +701,46 @@ async def test_service_list_events_in_range_empty_ranks_returns_empty_list() -> 
 
     # Подтверждение, что SQL-запрос к базе данных не отправлялся
     mock_session.execute.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_get_event_children_limit_exceeded_returns_422(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка валидации диапазона параметра limit эндпоинта GET /api/v1/events/{event_id}/children.
+    При передаче limit=501 (превышение le=500) запрос отклоняется со статусом 422 Unprocessable Content.
+    """
+    response = await async_client.get("/api/v1/events/1/children?limit=501")
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    data = response.json()
+    assert isinstance(data.get("detail"), list)
+    assert any("limit" in err.get("loc", []) for err in data["detail"])
+
+
+@pytest.mark.unit
+async def test_get_event_children_endpoint_wiring(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка сквозной проводки эндпоинта GET /api/v1/events/{event_id}/children.
+    Валидирует разбор целочисленного event_id, передачу параметров пагинации по умолчанию (skip=0, limit=100)
+    в сервисный слой и сериализацию ответа в схему EventChildrenPage.
+    """
+    with patch(
+        "app.api.endpoints.events.list_event_children",
+        new_callable=AsyncMock,
+    ) as mock_list_children:
+        mock_list_children.return_value = ([], 0)
+
+        response = await async_client.get("/api/v1/events/42/children")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == {"items": [], "total": 0, "skip": 0, "limit": 100}
+
+        mock_list_children.assert_awaited_once()
+        kwargs = mock_list_children.call_args.kwargs
+        assert kwargs.get("event_id") == 42
+        assert kwargs.get("skip") == 0
+        assert kwargs.get("limit") == 100

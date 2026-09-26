@@ -267,5 +267,25 @@ describe('markers module', () => {
             expect(MAX_RENDERED_MARKERS_CEILING).toBe(500);
             expect(DEFAULT_MARKER_BUFFER_PX).toBe(50);
         });
+
+        it('возвращает дескрипторы строго без полей вертикальной раскладки (laneIndex, laneY, laneHeight)', () => {
+            const rawEvents = [
+                { id: 1, title: 'Точечное событие', start_date: 100, end_date: null, category: 'science' },
+                { id: 2, title: 'Интервальное событие', start_date: 200, end_date: 300, category: 'culture' },
+            ];
+
+            const markers = prepareEventMarkers(rawEvents, originTimestamp, secondsPerPixel, widthPx);
+
+            expect(markers).toHaveLength(2);
+
+            const allowedKeys = ['event', 'isPoint', 'screenX', 'themeVariable', 'widthPx'];
+
+            for (const marker of markers) {
+                expect(marker.laneIndex).toBeUndefined();
+                expect(marker.laneY).toBeUndefined();
+                expect(marker.laneHeight).toBeUndefined();
+                expect(Object.keys(marker).sort()).toEqual([...allowedKeys].sort());
+            }
+        });
     });
 });

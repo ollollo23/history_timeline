@@ -1,44 +1,57 @@
 /**
  * Контроллер интерактивного взаимодействия с временной осью таймлайна.
- * Связывает чистую модель состояния (viewport.js), графический конвейер (renderer.js),
- * хранилище событий (eventStore.js) и подсистему обработки пользовательского ввода
- * (Pointer Events, Wheel, Keyboard, ResizeObserver)[cite: 16].
+ * Связывает чистую модель состояния камеры (viewport.js), графический конвейер (renderer.js),
+ * хранилище событий (eventStore.js), хранилище выбора (selection.js), расчет раскладки (layout.js),
+ * геометрический хит-тест (hitTest.js), фокусировку камеры (focus.js) и обработку пользовательского ввода.
  *
  * АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
  * 1. Изоляция ответственности: контроллер не выполняет самостоятельных геометрических вычислений,
- *    делегируя трансформации чистым функциям panViewport, zoomViewport, resizeViewport[cite: 16].
- * 2. Двухконтурная модель данных: состояние виртуальной камеры синхронно управляет
- *    отрисовкой координатной сетки, а хранилище событий асинхронно буферизирует маркеры
- *    с подавлением сетевого дребезга и защитой от гонки ответов[cite: 16].
- * 3. Оптимизация сборщика мусора (GC Pressure): слепок состояния хранилища кэшируется
- *    в замыкании (lastStoreState), предотвращая повторное клонирование массива событий
- *    на каждый пиксель перемещения при панорамировании.
- * 4. Картографическая конвенция зума: прокрутка от себя (deltaY < 0) приближает масштаб,
- *    снижая secondsPerPixel за счет отрицательного приращения индекса zoomIndex[cite: 16].
- * 5. Безопасное управление памятью: в методе destroy строго соблюдается порядок очистки
- *    (хранилище -> ссылка кэша -> рендерер -> слушатели ввода -> наблюдатель размеров)[cite: 16].
+ *    делегируя трансформации чистым функциям panViewport, zoomViewport, resizeViewport.
+ * 2. Централизованный расчет раскладки: структура дорожек вычисляется один раз при изменении
+ *    камеры или данных и сохраняется в currentLayout для совместного использования рендерером и хит-тестом.
+ * 3. Разделение клика и перетаскивания: замер смещения указателя с порогом 5 пикселей предотвращает
+ *    случайное открытие боковой панели детализации при панорамировании холста.
+ * 4. Двухконтурное уведомление: внешний подписчик onStateChange получает согласованный слепок
+ *    из трех компонентов: состояние камеры, состояние хранилища событий и состояние выбора.
+ * 5. Безопасное управление памятью: в методе destroy строго соблюдается регламентированный порядок
+ *    утилизации хранилищ, очистки ссылок, остановки рендерера и снятия слушателей событий.
  */
 
-import { ZOOM_STEP_PER_WHEEL_NOTCH } from './constants.js';
+import {
+    HIT_TEST_TOLERANCE_PX,
+    MIN_EVENT_BAR_WIDTH_PX,
+    TIMELINE_CANVAS_HEIGHT_PX,
+    ZOOM_STEP_PER_WHEEL_NOTCH,
+} from './constants.js';
 import {
     getDefaultViewportState,
     panViewport,
     resizeViewport,
     zoomViewport,
 } from './viewport.js';
+import { zoomIndexToSecondsPerPixel } from './scale.js';
 import { createTimelineRenderer } from './renderer.js';
 import { createEventStore } from './eventStore.js';
-import { fetchEventsInRange } from '../services/api.js';
+import {
+    fetchEventsInRange,
+    fetchEventById,
+    fetchEventChildren,
+} from '../services/api.js';
 import { getActiveLadderLevel } from './ticks.js';
 import { getRanksForUnit } from './rankMapping.js';
+import { prepareEventMarkers } from './markers.js';
+import { computeTimelineLayout } from './layout.js';
+import { resolveCursorTarget } from './hitTest.js';
+import { createSelectionStore } from './selection.js';
+import { computeFocusViewport } from './focus.js';
 
 /**
  * Вычисление дискретного приращения логарифмического индекса масштаба по направлению прокрутки колеса мыши.
  * Реализует стандартную конвенцию: прокрутка вверх / от себя (deltaY < 0) приближает (уменьшает zoomIndex и spp),
- * прокрутка вниз / на себя (deltaY > 0) отдаляет (увеличивает zoomIndex и spp)[cite: 16].
+ * прокрутка вниз / на себя (deltaY > 0) отдаляет (увеличивает zoomIndex и spp).
  *
  * @param {number} deltaY Вертикальное смещение прокрутки колеса мыши.
- * @returns {number} Приращение логарифмического индекса масштаба (-ZOOM_STEP, 0 или +ZOOM_STEP)[cite: 16].
+ * @returns {number} Приращение логарифмического индекса масштаба (-ZOOM_STEP, 0 или +ZOOM_STEP).
  */
 export function computeWheelZoomDelta(deltaY) {
     if (!deltaY || deltaY === 0) {
@@ -50,29 +63,29 @@ export function computeWheelZoomDelta(deltaY) {
 /**
  * Нормализация дельты события прокрутки колеса мыши и трекпада.
  * Приводит различные режимы дельты (пиксели, строки, страницы) к единой шкале
- * и обрабатывает жесты сведения пальцев на тачпаде (Pinch-to-zoom)[cite: 16].
+ * и обрабатывает жесты сведения пальцев на тачпаде (Pinch-to-zoom).
  *
  * @param {WheelEvent} event Событие колеса мыши.
- * @returns {number} Нормализованное значение смещения в диапазоне [-100, 100][cite: 16].
+ * @returns {number} Нормализованное значение смещения в диапазоне [-100, 100].
  */
 export function normalizeWheelDelta(event) {
     let deltaY = event.deltaY;
 
-    // Режим строк (DOM_DELTA_LINE = 1, типично для Mozilla Firefox)[cite: 16]
+    // Режим строк (DOM_DELTA_LINE = 1, типично для Mozilla Firefox)
     if (event.deltaMode === 1) {
         deltaY *= 33.33;
     }
-    // Режим страниц (DOM_DELTA_PAGE = 2)[cite: 16]
+    // Режим страниц (DOM_DELTA_PAGE = 2)
     else if (event.deltaMode === 2) {
         deltaY *= 800;
     }
 
-    // Распознавание трекпадного pinch-to-zoom (в Chromium/Safari маскируется под wheel с зажатым ctrlKey)[cite: 16]
+    // Распознавание трекпадного pinch-to-zoom (в Chromium/Safari маскируется под wheel с зажатым ctrlKey)
     if (event.ctrlKey) {
         deltaY *= 2.5;
     }
 
-    // Ограничение максимального всплеска дельты за единичный тик события[cite: 16]
+    // Ограничение максимального всплеска дельты за единичный тик события
     return Math.max(-100, Math.min(100, deltaY));
 }
 
@@ -81,24 +94,34 @@ export function normalizeWheelDelta(event) {
  *
  * @param {HTMLCanvasElement} canvasElement DOM-элемент холста Canvas.
  * @param {HTMLElement} containerElement Родительский контейнер для отслеживания габаритов.
- * @param {((viewportState: Object, storeState: Object) => void)|null} [onStateChange=null]
- *        Колбэк уведомления об изменении состояния камеры и сетевого хранилища[cite: 16].
+ * @param {((viewportState: Object, storeState: Object, selectionState: Object) => void)|null} [onStateChange=null]
+ *        Колбэк уведомления об изменении состояния камеры, сетевого хранилища и выбора.
  * @param {{
  *   fetchFn?: Function,
+ *   fetchEventByIdFn?: Function,
+ *   fetchChildrenFn?: Function,
  *   categories?: string[],
- *   storeOptions?: Object
- * }} [options={}] Дополнительные параметры инициализации сетевого контура[cite: 16].
+ *   storeOptions?: Object,
+ *   selectionOptions?: Object,
+ *   hitTolerance?: number
+ * }} [options={}] Дополнительные параметры инициализации контроллера.
  * @returns {{
  *   getState: () => Object,
  *   getStoreState: () => Object,
  *   getStore: () => Object,
+ *   getSelectionStore: () => Object,
+ *   getSelectionState: () => Object,
+ *   getLayout: () => Object | null,
+ *   selectEvent: (id: number) => Promise<void>,
+ *   clearSelection: () => void,
+ *   focusEvent: (event: Object) => void,
  *   setState: (newState: Object) => void,
  *   pan: (deltaPx: number) => void,
  *   zoom: (anchorX: number, delta: number) => void,
  *   reset: () => void,
  *   destroy: () => void,
  *   unmount: () => void
- * }} Публичный интерфейс управления таймлайном[cite: 16].
+ * }} Публичный интерфейс управления таймлайном.
  */
 export function createTimelineController(
     canvasElement,
@@ -106,47 +129,119 @@ export function createTimelineController(
     onStateChange = null,
     options = {}
 ) {
-    // 1. Инициализация геометрии и начального состояния виртуальной камеры[cite: 16]
+    // 1. Инициализация геометрии и начального состояния виртуальной камеры
     const initialWidth = containerElement.clientWidth || 1000;
-    const initialHeight = containerElement.clientHeight || 320;
+    const initialHeight = containerElement.clientHeight || TIMELINE_CANVAS_HEIGHT_PX;
     let state = getDefaultViewportState(initialWidth, initialHeight);
 
-    // 2. Инициализация изолированного рендерера Canvas 2D[cite: 16]
+    // 2. Инициализация изолированного рендерера Canvas 2D
     const renderer = createTimelineRenderer(canvasElement);
 
-    // 3. Подготовка конфигурации и адаптеров сетевого хранилища событий[cite: 16]
+    // 3. Подготовка конфигурации и адаптеров сетевого хранилища событий
     const categories = Array.isArray(options.categories) ? options.categories : [];
     const fetchFn = options.fetchFn || fetchEventsInRange;
     const storeOptions = options.storeOptions || {};
 
-    // Кэшированный снимок состояния хранилища для предотвращения повторного клонирования массива событий при панорамировании
+    const fetchEventByIdFn = options.fetchEventByIdFn || fetchEventById;
+    const fetchChildrenFn = options.fetchChildrenFn || fetchEventChildren;
+    const hitTolerance = options.hitTolerance ?? HIT_TEST_TOLERANCE_PX;
+
+    // Кэшированные слепки состояния хранилищ и раскладки
     let lastStoreState = null;
+    let lastSelectionState = null;
+    let currentLayout = null;
+
+    // Переменные для фильтрации жестов перетаскивания и кликов
+    let pointerDownPos = null;
+    let isDragGesture = false;
+
+    // Кэширование состояния CSS-курсора для предотвращения избыточных reflow-записей в DOM
+    let currentCursor = 'grab';
 
     /**
-     * Обработчик асинхронного обновления данных в хранилище событий.
-     * Сохраняет полученный слепок в замыкании, передает события в рендерер,
-     * запрашивает перерисовку и уведомляет внешнего подписчика[cite: 16].
+     * Оптимизированная установка формы курсора манипулятора.
      *
-     * @param {Object} storeState Актуальный слепок состояния хранилища[cite: 16].
+     * @param {string} cursorStyle Желаемый стиль курсора.
      */
-    function handleStoreChange(storeState) {
-        lastStoreState = storeState;
-        renderer.setEvents(storeState.events);
-        renderer.requestRender(state);
-        if (typeof onStateChange === 'function') {
-            onStateChange(state, storeState);
+    function setCursor(cursorStyle) {
+        if (currentCursor !== cursorStyle) {
+            currentCursor = cursorStyle;
+            if (canvasElement) {
+                canvasElement.style.cursor = cursorStyle;
+            }
         }
     }
 
-    // Инициализация экземпляра хранилища событий[cite: 16]
-    const store = createEventStore(fetchFn, handleStoreChange, storeOptions);
+    /**
+     * Централизованный пересчет вертикальной раскладки дорожек.
+     * Проецирует маркеры событий и вычисляет координаты с сохранением закрепления дорожек.
+     */
+    function updateCurrentLayout() {
+        const spp = zoomIndexToSecondsPerPixel(state.zoomIndex);
+        const events =
+            lastStoreState && Array.isArray(lastStoreState.events)
+                ? lastStoreState.events
+                : [];
+        const markers = prepareEventMarkers(
+            events,
+            state.originTimestamp,
+            spp,
+            state.widthPx,
+            { minBarWidth: MIN_EVENT_BAR_WIDTH_PX }
+        );
+        const previousLaneAssignments = currentLayout?.laneAssignments || null;
+        currentLayout = computeTimelineLayout(
+            markers,
+            state.widthPx,
+            state.heightPx,
+            { previousLaneAssignments }
+        );
+    }
 
-    // Первичное сохранение слепка состояния хранилища после инициализации
+    /**
+     * Обработчик реактивного изменения состояния выбора исторического события.
+     *
+     * @param {Object} selectionState Актуальный слепок состояния SelectionState.
+     */
+    function handleSelectionChange(selectionState) {
+        lastSelectionState = selectionState;
+        renderer.setSelection(selectionState.selectedId);
+        renderer.requestRender(state, currentLayout);
+        if (typeof onStateChange === 'function') {
+            onStateChange(state, lastStoreState, lastSelectionState);
+        }
+    }
+
+    // Инициализация хранилища выбора события
+    const selectionStore = createSelectionStore(
+        fetchEventByIdFn,
+        fetchChildrenFn,
+        handleSelectionChange,
+        options.selectionOptions || {}
+    );
+    lastSelectionState = selectionStore.getState();
+
+    /**
+     * Обработчик асинхронного обновления данных в хранилище событий.
+     *
+     * @param {Object} storeState Актуальный слепок состояния хранилища.
+     */
+    function handleStoreChange(storeState) {
+        lastStoreState = storeState;
+        updateCurrentLayout();
+        renderer.requestRender(state, currentLayout);
+        if (typeof onStateChange === 'function') {
+            onStateChange(state, lastStoreState, lastSelectionState);
+        }
+    }
+
+    // Инициализация экземпляра хранилища событий
+    const store = createEventStore(fetchFn, handleStoreChange, storeOptions);
     lastStoreState = store.getState();
 
     /**
      * Вычисляет активный уровень лестницы сетки, определяет набор запрашиваемых рангов
-     * и передает задачу загрузки данных в хранилище[cite: 16].
+     * и передает задачу загрузки данных в хранилище.
      */
     function requestEventsForCurrentState() {
         const activeLevel = getActiveLadderLevel(state);
@@ -154,30 +249,53 @@ export function createTimelineController(
         store.requestWindow(state, activeRanks, categories);
     }
 
-    // Первичная отрисовка координатной сетки и запрос событий для начального экрана[cite: 16]
-    renderer.requestRender(state);
+    // Первичный расчет раскладки, отрисовка координатной сетки и запрос событий
+    updateCurrentLayout();
+    renderer.requestRender(state, currentLayout);
     requestEventsForCurrentState();
 
-    // 4. Структуры данных для отслеживания мультитач-жестов[cite: 16]
+    // 4. Структуры данных для отслеживания мультитач-жестов
     const activePointers = new Map();
     let initialPinchDistance = null;
     let initialPinchZoomIndex = null;
 
     /**
      * Централизованное обновление состояния камеры с перерисовкой и запросом данных.
-     * Использует закэшированный слепок lastStoreState без вызова store.getState(),
-     * устраняя выделение памяти под копию массива на каждый кадр движения[cite: 16].
      *
-     * @param {Object} newState Новый замороженный слепок состояния ViewportState[cite: 16].
+     * @param {Object} newState Новый замороженный слепок состояния ViewportState.
      */
     function updateState(newState) {
         if (state !== newState) {
             state = newState;
-            renderer.requestRender(state);
+            updateCurrentLayout();
+            renderer.requestRender(state, currentLayout);
             requestEventsForCurrentState();
             if (typeof onStateChange === 'function') {
-                onStateChange(state, lastStoreState);
+                onStateChange(state, lastStoreState, lastSelectionState);
             }
+        }
+    }
+
+    /**
+     * Фокусировка виртуальной камеры на историческом событии с подбором оптимального масштаба.
+     *
+     * @param {Object} event Доменный объект исторического события.
+     */
+    function focusEvent(event) {
+        if (
+            !event ||
+            typeof event !== 'object' ||
+            typeof event.start_date !== 'number' ||
+            !Number.isFinite(event.start_date)
+        ) {
+            return;
+        }
+
+        const nextState = computeFocusViewport(state, event);
+        updateState(nextState);
+
+        if (event.id !== undefined && event.id !== null) {
+            selectionStore.select(event.id);
         }
     }
 
@@ -187,56 +305,50 @@ export function createTimelineController(
 
     /**
      * Обработка масштабирования колесом мыши относительно курсора.
-     * Использует функцию computeWheelZoomDelta для соблюдения конвенции направления зума[cite: 16].
      *
      * @param {WheelEvent} e
      */
     function handleWheel(e) {
-        // Гарантированная отмена вертикальной прокрутки страницы[cite: 16]
         e.preventDefault();
 
-        // Вычисление приращения логарифмического индекса зума[cite: 16]
         const zoomDelta = computeWheelZoomDelta(e.deltaY);
         if (zoomDelta === 0) {
             return;
         }
 
-        // Вычисление экранной координаты курсора относительно левой границы холста[cite: 16]
         const rect = canvasElement.getBoundingClientRect();
         const anchorX = e.clientX - rect.left;
 
-        // Применение масштабирования с сохранением точки под курсором[cite: 16]
         updateState(zoomViewport(state, anchorX, zoomDelta));
     }
 
     /**
-     * Начало взаимодействия указателем (мышь, стилус, сенсорный палец)[cite: 16].
+     * Начало взаимодействия указателем (мышь, стилус, сенсорный палец).
      *
      * @param {PointerEvent} e
      */
     function handlePointerDown(e) {
-        // Захват указателя для непрерывного отслеживания перемещения за пределами холста[cite: 16]
         try {
             canvasElement.setPointerCapture(e.pointerId);
         } catch {
-            // Защита от редких сбоев браузера при мгновенной отмене касания[cite: 16]
+            // Защита от редких сбоев браузера при мгновенной отмене касания
         }
 
         activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        // Одиночный указатель: переключение курсора в режим активного захвата[cite: 16]
+        // Сохранение начальной точки нажатия для детекции жеста перетаскивания
         if (activePointers.size === 1) {
-            canvasElement.style.cursor = 'grabbing';
-        }
-        // Появление второго указателя: сброс параметров для нового pinch-to-zoom жеста[cite: 16]
-        else if (activePointers.size === 2) {
+            pointerDownPos = { x: e.clientX, y: e.clientY };
+            isDragGesture = false;
+            setCursor('grabbing');
+        } else if (activePointers.size === 2) {
             initialPinchDistance = null;
             initialPinchZoomIndex = null;
         }
     }
 
     /**
-     * Перемещение указателя (панорамирование или мультитач-зум)[cite: 16].
+     * Перемещение указателя (панорамирование или мультитач-зум).
      *
      * @param {PointerEvent} e
      */
@@ -245,7 +357,18 @@ export function createTimelineController(
             return;
         }
 
-        // Сценарий 1: Одиночный указатель — линейное панорамирование[cite: 16]
+        // Проверка превышения порога перемещения для разделения клика и сдвига
+        if (pointerDownPos) {
+            const dragDistance = Math.hypot(
+                e.clientX - pointerDownPos.x,
+                e.clientY - pointerDownPos.y
+            );
+            if (dragDistance > 5) {
+                isDragGesture = true;
+            }
+        }
+
+        // Сценарий 1: Одиночный указатель — линейное панорамирование
         if (activePointers.size === 1) {
             const prev = activePointers.get(e.pointerId);
             const deltaX = e.clientX - prev.x;
@@ -256,7 +379,7 @@ export function createTimelineController(
                 updateState(panViewport(state, deltaX));
             }
         }
-        // Сценарий 2: Два указателя — масштабирование двумя пальцами (Pinch-to-zoom)[cite: 16]
+        // Сценарий 2: Два указателя — масштабирование двумя пальцами (Pinch-to-zoom)
         else if (activePointers.size === 2) {
             activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -266,12 +389,10 @@ export function createTimelineController(
             const rect = canvasElement.getBoundingClientRect();
             const midX = (p1.x + p2.x) / 2 - rect.left;
 
-            // Фиксация опорного расстояния при старте жеста сведения пальцев[cite: 16]
             if (initialPinchDistance === null || initialPinchDistance === 0) {
                 initialPinchDistance = currentDistance;
                 initialPinchZoomIndex = state.zoomIndex;
             } else if (currentDistance > 0) {
-                // Расчет приращения зума из логарифмического отношения дистанций[cite: 16]
                 const zoomDelta = Math.log2(currentDistance / initialPinchDistance);
                 const targetZoom = initialPinchZoomIndex + zoomDelta;
                 const deltaToApply = targetZoom - state.zoomIndex;
@@ -284,7 +405,7 @@ export function createTimelineController(
     }
 
     /**
-     * Завершение взаимодействия указателем (отпускание клавиши мыши или пальца)[cite: 16].
+     * Завершение взаимодействия указателем (отпускание клавиши мыши или пальца).
      *
      * @param {PointerEvent} e
      */
@@ -294,56 +415,123 @@ export function createTimelineController(
         try {
             canvasElement.releasePointerCapture(e.pointerId);
         } catch {
-            // Безопасный перехват при автоматическом освобождении захвата браузером[cite: 16]
+            // Безопасный перехват при автоматическом освобождении захвата браузером
         }
 
         if (activePointers.size === 0) {
-            canvasElement.style.cursor = 'grab';
+            setCursor('grab');
             initialPinchDistance = null;
             initialPinchZoomIndex = null;
         } else if (activePointers.size === 1) {
-            // Сброс параметров пинча при переходе обратно к режиму панорамирования одним пальцем[cite: 16]
             initialPinchDistance = null;
             initialPinchZoomIndex = null;
         }
     }
 
     /**
-     * Аварийная отмена события указателя (потеря фокуса, системное прерывание)[cite: 16].
+     * Аварийная отмена события указателя.
      *
      * @param {PointerEvent} e
      */
     function handlePointerCancel(e) {
+        isDragGesture = false;
+        pointerDownPos = null;
         handlePointerUp(e);
     }
 
     /**
-     * Клавиатурная навигация и стандарты доступности (WCAG)[cite: 16].
+     * Обработка клика по холсту с определением цели под курсором.
+     *
+     * @param {MouseEvent} e
+     */
+    function handleClick(e) {
+        // Если указатель сместился более чем на 5px, клик не обрабатывается
+        if (isDragGesture) {
+            isDragGesture = false;
+            pointerDownPos = null;
+            return;
+        }
+        pointerDownPos = null;
+
+        const rect = canvasElement.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (!currentLayout) {
+            updateCurrentLayout();
+        }
+
+        const target = resolveCursorTarget(currentLayout, x, y, hitTolerance);
+
+        if (target) {
+            if (target.type === 'aggregate') {
+                // Клик по бейджу агрегата: выбор родителя для просмотра списка потомков
+                selectionStore.select(target.parentId);
+            } else if (target.type === 'overflow') {
+                // Клик по маркеру переполнения: плавное приближение к области скрытых событий
+                updateState(
+                    zoomViewport(
+                        state,
+                        target.screenX,
+                        -ZOOM_STEP_PER_WHEEL_NOTCH * 2
+                    )
+                );
+            } else if (target.event && target.event.id !== undefined) {
+                // Клик по маркеру события: открытие карточки детализации
+                selectionStore.select(target.event.id);
+            }
+        } else {
+            // Клик в пустое пространство: сброс активного выбора
+            selectionStore.clear();
+        }
+    }
+
+    /**
+     * Обработка перемещения курсора без зажатых кнопок для динамической смены указателя.
+     *
+     * @param {PointerEvent} e
+     */
+    function handlePointerHover(e) {
+        if (activePointers.size > 0) {
+            return;
+        }
+
+        const rect = canvasElement.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (!currentLayout) {
+            updateCurrentLayout();
+        }
+
+        const target = resolveCursorTarget(currentLayout, x, y, hitTolerance);
+
+        setCursor(target ? 'pointer' : 'grab');
+    }
+
+    /**
+     * Клавиатурная навигация и стандарты доступности (WCAG).
      *
      * @param {KeyboardEvent} e
      */
     function handleKeyDown(e) {
-        // Обработка клавиш только при активном фокусе на холсте[cite: 16]
         if (document.activeElement !== canvasElement) {
             return;
         }
 
         switch (e.key) {
             case 'ArrowLeft':
-                // Сдвиг вправо (в прошлое) на 10% ширины видимой области[cite: 16]
                 e.preventDefault();
                 updateState(panViewport(state, state.widthPx * 0.1));
                 break;
 
             case 'ArrowRight':
-                // Сдвиг влево (в будущее) на 10% ширины видимой области[cite: 16]
                 e.preventDefault();
                 updateState(panViewport(state, -state.widthPx * 0.1));
                 break;
 
             case '+':
             case '=':
-                // Приближение относительно центра экрана (уменьшение zoomIndex снижает secondsPerPixel)[cite: 16]
                 e.preventDefault();
                 updateState(
                     zoomViewport(
@@ -356,7 +544,6 @@ export function createTimelineController(
 
             case '-':
             case '_':
-                // Отдаление относительно центра экрана (увеличение zoomIndex увеличивает secondsPerPixel)[cite: 16]
                 e.preventDefault();
                 updateState(
                     zoomViewport(
@@ -368,7 +555,6 @@ export function createTimelineController(
                 break;
 
             case 'Home':
-                // Возврат к стандартному обзору эпохи по умолчанию[cite: 16]
                 e.preventDefault();
                 updateState(getDefaultViewportState(state.widthPx, state.heightPx));
                 break;
@@ -382,7 +568,6 @@ export function createTimelineController(
     // ИНИЦИАЛИЗАЦИЯ И РЕГИСТРАЦИЯ СЛУШАТЕЛЕЙ
     // ==========================================================================
 
-    // Настройка доступности (Accessibility) холста[cite: 16]
     canvasElement.tabIndex = 0;
     canvasElement.setAttribute('role', 'region');
     canvasElement.setAttribute(
@@ -391,21 +576,23 @@ export function createTimelineController(
             'клавиши плюс и минус для масштабирования, клавишу Home для сброса.'
     );
     canvasElement.style.outline = 'none';
-    canvasElement.style.cursor = 'grab';
+    setCursor('grab');
 
-    // Регистрация слушателя колеса с отключением пассивного режима (passive: false)[cite: 16]
+    // Регистрация слушателей колеса и клавиатуры
     canvasElement.addEventListener('wheel', handleWheel, { passive: false });
+    canvasElement.addEventListener('keydown', handleKeyDown);
 
-    // Регистрация событий унифицированного указателя Pointer Events[cite: 16]
+    // Регистрация слушателей указателя
     canvasElement.addEventListener('pointerdown', handlePointerDown);
     canvasElement.addEventListener('pointermove', handlePointerMove);
     canvasElement.addEventListener('pointerup', handlePointerUp);
     canvasElement.addEventListener('pointercancel', handlePointerCancel);
 
-    // Регистрация слушателя клавиатуры[cite: 16]
-    canvasElement.addEventListener('keydown', handleKeyDown);
+    // Регистрация интерактивных слушателей клика и наведения
+    canvasElement.addEventListener('click', handleClick);
+    canvasElement.addEventListener('pointermove', handlePointerHover);
 
-    // Отслеживание адаптивного изменения геометрических размеров контейнера[cite: 16]
+    // Отслеживание адаптивного изменения геометрических размеров контейнера
     const resizeObserver = new ResizeObserver((entries) => {
         if (!entries || entries.length === 0) {
             return;
@@ -413,7 +600,10 @@ export function createTimelineController(
 
         const entry = entries[0];
         const newWidth = Math.round(entry.contentRect.width) || containerElement.clientWidth;
-        const newHeight = Math.round(entry.contentRect.height) || containerElement.clientHeight;
+        const newHeight =
+            Math.round(entry.contentRect.height) ||
+            containerElement.clientHeight ||
+            TIMELINE_CANVAS_HEIGHT_PX;
 
         if (
             newWidth > 0 &&
@@ -431,36 +621,44 @@ export function createTimelineController(
     // ==========================================================================
 
     /**
-     * Полная остановка контроллера, снятие слушателей и освобождение памяти[cite: 16].
+     * Полная остановка контроллера, снятие слушателей и освобождение памяти.
      */
     function destroy() {
-        // 1. Остановка хранилища событий (отмена таймеров debounce и прерывание сетевых запросов)[cite: 16]
+        // 1. Остановка хранилища событий
         store.destroy();
 
-        // 2. Обнуление кэшированной ссылки на состояние хранилища для исключения утечек памяти
-        lastStoreState = null;
+        // 2. Остановка хранилища выбора
+        selectionStore.destroy();
 
-        // 3. Уничтожение подсистемы рендеринга и освобождение буфера[cite: 16]
+        // 3. Обнуление кэшированных ссылок состояния
+        lastStoreState = null;
+        lastSelectionState = null;
+        currentLayout = null;
+        pointerDownPos = null;
+
+        // 4. Уничтожение подсистемы рендеринга
         renderer.destroy();
 
-        // 4. Снятие слушателей ввода[cite: 16]
+        // 5. Снятие всех слушателей с DOM-элемента холста
         canvasElement.removeEventListener('wheel', handleWheel);
+        canvasElement.removeEventListener('keydown', handleKeyDown);
         canvasElement.removeEventListener('pointerdown', handlePointerDown);
         canvasElement.removeEventListener('pointermove', handlePointerMove);
         canvasElement.removeEventListener('pointerup', handlePointerUp);
         canvasElement.removeEventListener('pointercancel', handlePointerCancel);
-        canvasElement.removeEventListener('keydown', handleKeyDown);
+        canvasElement.removeEventListener('click', handleClick);
+        canvasElement.removeEventListener('pointermove', handlePointerHover);
 
-        // 5. Остановка наблюдателя размеров[cite: 16]
+        // 6. Остановка наблюдателя размеров
         resizeObserver.disconnect();
 
-        // 6. Очистка активных указателей[cite: 16]
+        // 7. Очистка активных указателей
         activePointers.clear();
     }
 
     return {
         /**
-         * Получение текущего замороженного состояния ViewportState[cite: 16].
+         * Получение текущего замороженного состояния ViewportState.
          * @returns {Object}
          */
         getState: () => state,
@@ -472,37 +670,73 @@ export function createTimelineController(
         getStoreState: () => lastStoreState || store.getState(),
 
         /**
-         * Получение прямого доступа к экземпляру хранилища событий[cite: 16].
+         * Получение прямого доступа к экземпляру хранилища событий.
          * @returns {Object}
          */
         getStore: () => store,
 
         /**
-         * Программное обновление состояния[cite: 16].
+         * Получение прямого доступа к хранилищу выбора.
+         * @returns {Object}
+         */
+        getSelectionStore: () => selectionStore,
+
+        /**
+         * Получение актуального слепка состояния выбора.
+         * @returns {Object}
+         */
+        getSelectionState: () => lastSelectionState || selectionStore.getState(),
+
+        /**
+         * Получение последнего рассчитанного слепка компоновки дорожек.
+         * @returns {Object|null}
+         */
+        getLayout: () => currentLayout,
+
+        /**
+         * Программный выбор события по его идентификатору.
+         * @param {number} id Идентификатор события.
+         * @returns {Promise<void>}
+         */
+        selectEvent: (id) => selectionStore.select(id),
+
+        /**
+         * Программный сброс активного выбора.
+         */
+        clearSelection: () => selectionStore.clear(),
+
+        /**
+         * Программная фокусировка камеры на событии.
+         * @param {Object} event Доменный объект события.
+         */
+        focusEvent,
+
+        /**
+         * Программное обновление состояния камеры.
          * @param {Object} newState
          */
         setState: updateState,
 
         /**
-         * Программное панорамирование на заданное количество пикселей[cite: 16].
+         * Программное панорамирование на заданное количество пикселей.
          * @param {number} deltaPx
          */
         pan: (deltaPx) => updateState(panViewport(state, deltaPx)),
 
         /**
-         * Программное масштабирование относительно точки привязки[cite: 16].
+         * Программное масштабирование относительно точки привязки.
          * @param {number} anchorX
          * @param {number} delta
          */
         zoom: (anchorX, delta) => updateState(zoomViewport(state, anchorX, delta)),
 
         /**
-         * Сброс масштаба и положения к состоянию по умолчанию[cite: 16].
+         * Сброс масштаба и положения к состоянию по умолчанию.
          */
         reset: () => updateState(getDefaultViewportState(state.widthPx, state.heightPx)),
 
         /**
-         * Уничтожение контроллера (совместимо с контрактом unmount роутера)[cite: 16].
+         * Уничтожение контроллера (совместимо с контрактом unmount роутера).
          */
         destroy,
         unmount: destroy,

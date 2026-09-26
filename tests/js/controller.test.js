@@ -8,7 +8,7 @@
  * СИСТЕМНЫЕ ПРАВИЛА:
  * 1. Изоляция исполнения в среде Node.js под управлением Vitest без DOM и Canvas.
  * 2. Двухуровневый подъем импортов из ядра таймлайна (../../frontend/js/timeline/...).
- * 3. Строгое соответствие правилам линтинга ESLint 9 (Flat Config)[cite: 23].
+ * 3. Строгое соответствие правилам линтинга ESLint 9 (Flat Config).
  */
 
 import { describe, it, expect } from 'vitest';

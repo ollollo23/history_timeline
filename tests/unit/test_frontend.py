@@ -263,3 +263,57 @@ async def test_route_segment_isolation_spa_and_service_paths(
     else:
         assert "application/json" in response.headers.get("content-type", "")
         assert response.json() == {"detail": expected_body_token}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/static/js/timeline/layout.js",
+        "/static/js/timeline/hitTest.js",
+        "/static/js/timeline/selection.js",
+        "/static/js/components/detailPanel.js",
+        "/static/js/timeline/focus.js",
+    ],
+)
+async def test_serve_step_3_interactive_modules(
+    async_client: AsyncClient,
+    path: str,
+) -> None:
+    """
+    Параметризованная проверка сетевой отдачи пяти интерактивных модулей шага 3.
+    Контролирует доступность модулей компоновки дорожек, детекции курсора,
+    хранилища выбора, компонента боковой панели и фокусировки на событиях со статусом 200 OK и JavaScript MIME-типом.
+    """
+    response = await async_client.get(path)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "javascript" in response.headers["content-type"].lower()
+
+
+@pytest.mark.unit
+async def test_layout_rank_enum_synchronization(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка кросс-контурной синхронизации списка рангов модуля layout.js
+    с серверным перечислением EventRank.
+    Гарантирует, что шкала приоритетов компоновки в клиенте строго соответствует
+    серверному порядку возрастания глубины детализации (depth_level), предотвращая
+    ошибки вытеснения макрособытий при дефиците дорожек на таймлайне.
+    """
+    # Получение содержимого клиентского модуля layout.js
+    response = await async_client.get("/static/js/timeline/layout.js")
+    assert response.status_code == status.HTTP_200_OK
+
+    # Формирование эталонного списка рангов по возрастанию глубины детализации
+    expected_ranks = [rank.value for rank in sorted(EventRank, key=lambda r: r.depth_level())]
+    assert len(expected_ranks) == 8
+
+    # Проверка монотонного возрастания позиций рангов в коде layout.js
+    last_index = -1
+    for rank_value in expected_ranks:
+        pos = response.text.find(rank_value)
+        assert pos != -1, f"Ранг '{rank_value}' не найден в коде layout.js"
+        assert pos > last_index, f"Ранг '{rank_value}' нарушает порядок иерархии в layout.js"
+        last_index = pos

@@ -1,8 +1,9 @@
 /**
- * Модульные тесты форматирования текстовых меток дат, уровней сетки и интервалов (format.js).
+ * Модульные тесты форматирования текстовых меток дат, уровней сетки, интервалов и дат событий (format.js).
  * Валидируют исторические суффиксы, астрономический сдвиг нулевого года,
  * компактные формы тысячелетий и миллионов лет без дробных хвостов,
- * а также полную русскую локализацию всех 23 уровней лестницы TICK_LADDER.
+ * полную русскую локализацию всех 23 уровней лестницы TICK_LADDER,
+ * а также ранговую точность форматирования дат и диапазонов событий.
  *
  * СИСТЕМНЫЕ ПРАВИЛА:
  * 1. Исполнение в среде Node.js под управлением Vitest без зависимостей от DOM и Canvas.
@@ -16,6 +17,8 @@ import {
     formatTickLabel,
     formatScaleLevelName,
     formatContextInterval,
+    formatEventDate,
+    formatEventDateRange,
     padZero,
 } from '../../frontend/js/timeline/format.js';
 import { TICK_LADDER } from '../../frontend/js/timeline/constants.js';
@@ -277,5 +280,235 @@ describe('formatContextInterval and padZero', () => {
         expect(padZero(12)).toBe('12');
         expect(padZero(7, 3)).toBe('007');
         expect(padZero(1234, 2)).toBe('1234');
+    });
+});
+
+describe('formatEventDate', () => {
+    it('форматирует дату события с точностью до года для рангов century, decade, year', () => {
+        const ts2024May15 = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+
+        // Наша эра
+        expect(formatEventDate(ts2024May15, 'century')).toBe('2024');
+        expect(formatEventDate(ts2024May15, 'decade')).toBe('2024');
+        expect(formatEventDate(ts2024May15, 'year')).toBe('2024');
+
+        // До нашей эры (-43 астрономический год соответствует 44 году до н. э.)
+        const tsBce = civilToTimestamp({
+            year: -43,
+            month: 3,
+            day: 15,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        });
+        expect(formatEventDate(tsBce, 'century')).toBe('44 до н. э.');
+        expect(formatEventDate(tsBce, 'decade')).toBe('44 до н. э.');
+        expect(formatEventDate(tsBce, 'year')).toBe('44 до н. э.');
+    });
+
+    it('форматирует дату события с точностью до месяца для ранга month', () => {
+        const ts2024May15 = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+        expect(formatEventDate(ts2024May15, 'month')).toBe('май 2024');
+
+        const tsBce = civilToTimestamp({
+            year: -43,
+            month: 3,
+            day: 15,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        });
+        expect(formatEventDate(tsBce, 'month')).toBe('мар 44 до н. э.');
+    });
+
+    it('форматирует дату события с точностью до дня для ранга day', () => {
+        const ts2024May15 = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+        expect(formatEventDate(ts2024May15, 'day')).toBe('15 май 2024');
+
+        const tsJan1 = civilToTimestamp({
+            year: 2024,
+            month: 1,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        });
+        expect(formatEventDate(tsJan1, 'day')).toBe('1 янв 2024');
+
+        const tsBce = civilToTimestamp({
+            year: -43,
+            month: 3,
+            day: 15,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        });
+        expect(formatEventDate(tsBce, 'day')).toBe('15 мар 44 до н. э.');
+    });
+
+    it('форматирует дату события с точностью до минут для рангов hour и minute', () => {
+        const ts2024May15 = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+        expect(formatEventDate(ts2024May15, 'hour')).toBe('15 май 2024 14:30');
+        expect(formatEventDate(ts2024May15, 'minute')).toBe('15 май 2024 14:30');
+
+        // Проверка лидирующих нулей в часах и минутах
+        const tsLeadingZeros = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 5,
+            hour: 4,
+            minute: 5,
+            second: 9,
+        });
+        expect(formatEventDate(tsLeadingZeros, 'hour')).toBe('5 май 2024 04:05');
+        expect(formatEventDate(tsLeadingZeros, 'minute')).toBe('5 май 2024 04:05');
+    });
+
+    it('форматирует дату события с точностью до секунд для ранга second', () => {
+        const ts2024May15 = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+        expect(formatEventDate(ts2024May15, 'second')).toBe('15 май 2024 14:30:15');
+
+        // Проверка лидирующих нулей в часах, минутах и секундах
+        const tsLeadingZeros = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 5,
+            hour: 4,
+            minute: 5,
+            second: 9,
+        });
+        expect(formatEventDate(tsLeadingZeros, 'second')).toBe('5 май 2024 04:05:09');
+    });
+
+    it('применяет форматирование суточного уровня по умолчанию при неизвестном или некорректном ранге', () => {
+        const ts2024May15 = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+        expect(formatEventDate(ts2024May15, 'unknown_rank')).toBe('15 май 2024');
+        expect(formatEventDate(ts2024May15, null)).toBe('15 май 2024');
+        expect(formatEventDate(ts2024May15, undefined)).toBe('15 май 2024');
+        expect(formatEventDate(ts2024May15, '')).toBe('15 май 2024');
+    });
+
+    it('возвращает пустую строку при невалидной временной метке', () => {
+        expect(formatEventDate(NaN, 'day')).toBe('');
+        expect(formatEventDate('invalid', 'day')).toBe('');
+        expect(formatEventDate(null, 'day')).toBe('');
+        expect(formatEventDate(undefined, 'day')).toBe('');
+    });
+});
+
+describe('formatEventDateRange', () => {
+    it('возвращает одиночную дату начала для точечных событий без конечной даты', () => {
+        const tsStart = civilToTimestamp({
+            year: 2024,
+            month: 5,
+            day: 15,
+            hour: 14,
+            minute: 30,
+            second: 15,
+        });
+
+        // Отсутствие endTimestamp (null или undefined)
+        expect(formatEventDateRange(tsStart, null, 'year')).toBe('2024');
+        expect(formatEventDateRange(tsStart, undefined, 'day')).toBe('15 май 2024');
+
+        // Конечная дата меньше либо равна начальной
+        expect(formatEventDateRange(tsStart, tsStart - 100, 'hour')).toBe('15 май 2024 14:30');
+        expect(formatEventDateRange(tsStart, tsStart, 'hour')).toBe('15 май 2024 14:30');
+    });
+
+    it('схлопывает диапазон в одиночную дату, если строковые представления совпадают при выбранной точности', () => {
+        // Событие началось 15 мая 2024 в 10:00 и закончилось 15 мая 2024 в 18:00
+        const ts10 = civilToTimestamp({ year: 2024, month: 5, day: 15, hour: 10, minute: 0, second: 0 });
+        const ts18 = civilToTimestamp({ year: 2024, month: 5, day: 15, hour: 18, minute: 0, second: 0 });
+
+        // При ранге day даты совпадают -> схлопывание в одну дату
+        expect(formatEventDateRange(ts10, ts18, 'day')).toBe('15 май 2024');
+
+        // Для ранга year диапазон внутри одного года схлопывается в число года
+        const ts1945Jan1 = civilToTimestamp({ year: 1945, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        const ts1945May9 = civilToTimestamp({ year: 1945, month: 5, day: 9, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(ts1945Jan1, ts1945May9, 'year')).toBe('1945');
+
+        // При ранге hour для того же события выводится полноценный диапазон
+        expect(formatEventDateRange(ts10, ts18, 'hour')).toBe(
+            '15 май 2024 10:00 — 15 май 2024 18:00'
+        );
+    });
+
+    it('корректно форматирует полноценный диапазон дат нашей эры', () => {
+        const ts1914 = civilToTimestamp({ year: 1914, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        const ts1918 = civilToTimestamp({ year: 1918, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(ts1914, ts1918, 'year')).toBe('1914 — 1918');
+
+        const tsJan1 = civilToTimestamp({ year: 2024, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        const tsJan10 = civilToTimestamp({ year: 2024, month: 1, day: 10, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(tsJan1, tsJan10, 'day')).toBe('1 янв 2024 — 10 янв 2024');
+    });
+
+    it('корректно форматирует диапазон дат до нашей эры и переход через нулевой год', () => {
+        // Даты до нашей эры: -499 (500 до н. э.) по -439 (440 до н. э.)
+        const ts500bce = civilToTimestamp({ year: -499, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        const ts440bce = civilToTimestamp({ year: -439, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(ts500bce, ts440bce, 'year')).toBe('500 до н. э. — 440 до н. э.');
+
+        // Переход через нулевой год: -43 (44 до н. э.) по 14 (14 н. э.)
+        const ts44bce = civilToTimestamp({ year: -43, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        const ts14ce = civilToTimestamp({ year: 14, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(ts44bce, ts14ce, 'year')).toBe('44 до н. э. — 14 н. э.');
+    });
+
+    it('форматирует границы диапазона по суточному правилу при неизвестном ранге', () => {
+        const tsJan1 = civilToTimestamp({ year: 2024, month: 1, day: 1, hour: 0, minute: 0, second: 0 });
+        const tsJan10 = civilToTimestamp({ year: 2024, month: 1, day: 10, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(tsJan1, tsJan10, 'custom')).toBe('1 янв 2024 — 10 янв 2024');
+    });
+
+    it('возвращает пустую строку при невалидной начальной метке времени', () => {
+        const tsJan10 = civilToTimestamp({ year: 2024, month: 1, day: 10, hour: 0, minute: 0, second: 0 });
+        expect(formatEventDateRange(null, tsJan10, 'day')).toBe('');
+        expect(formatEventDateRange(NaN, tsJan10, 'day')).toBe('');
+        expect(formatEventDateRange('invalid', tsJan10, 'day')).toBe('');
     });
 });

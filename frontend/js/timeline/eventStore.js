@@ -2,24 +2,26 @@
  * Модуль изолированного хранилища событий (Event Store) таймлайна.
  * Управляет асинхронной загрузкой данных, кэшированием единого окна,
  * подавлением частоты сетевых обращений (debounce), защитой от гонки ответов
- * и детекцией усечения выборки[cite: 14].
+ * и детекцией усечения выборки.
  *
  * АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
  * 1. Изоляция ввода-вывода: сетевая функция fetchFn и функция обратного вызова
  *    onStateChange внедряются через параметры фабрики, обеспечивая 100% покрытие
- *    тестами в среде Node.js без эмуляции глобального объекта fetch[cite: 14].
+ *    тестами в среде Node.js без эмуляции глобального объекта fetch.
  * 2. Двойная защита от гонок: перед каждым новым запросом активный AbortController
  *    прерывает предыдущее сетевое соединение, а монотонный идентификатор requestId
- *    отсекает ответы, пришедшие не в порядке отправки[cite: 14].
+ *    отсекает ответы, пришедшие не в порядке отправки.
  * 3. Разделение окон проверки кэша и загрузки: попадание в кэш оценивается по
  *    видимой области экрана (multiplier = 1), тогда как сетевая выборка упреждает
- *    панорамирование с трехкратным запасом (multiplier = DEFAULT_PREFETCH_MULTIPLIER = 3)[cite: 14].
+ *    панорамирование с трехкратным запасом (multiplier = DEFAULT_PREFETCH_MULTIPLIER = 3).
  * 4. Безопасное управление памятью: метод destroy гарантированно останавливает таймеры,
- *    прерывает активные соединения и блокирует любые последующие вызовы onStateChange[cite: 14].
+ *    прерывает активные соединения и блокирует любые последующие вызовы onStateChange.
  * 5. Детекция усечения: запрос softLimit + 1 записей позволяет определить наличие
- *    непоместившихся событий без изменения контракта эндпоинта и без серверных счетчиков[cite: 14].
- * 6. Динамическая адаптация окна кэша: при усечении выборки правая граница загруженного окна
- *    сужается до даты последнего полученного события, предотвращая появление «слепых зон» на шкале.
+ *    непоместившихся событий без изменения контракта эндпоинта и без серверных счетчиков.
+ * 6. Кэширование усеченного окна: при усечении выборки регистрируется полное окно упреждения
+ *    вместе с масштабом загрузки loadedZoomIndex. Перезапрос данных при усечении происходит
+ *    только при приближении масштаба (zoom in) на величину TRUNCATED_REFETCH_ZOOM_INDEX_DELTA
+ *    и более, исключая повторные сетевые вызовы при сдвиге внутри окна.
  * 7. Экспоненциальная задержка при сбоях: счетчик consecutiveFailures увеличивает паузу
  *    между повторными сетевыми попытками до 2000 мс при недоступности API.
  */
@@ -31,40 +33,49 @@ import {
 } from './loadWindow.js';
 
 /**
- * Базовая задержка подавления частоты запросов при панорамировании в миллисекундах[cite: 14].
+ * Базовая задержка подавления частоты запросов при панорамировании в миллисекундах.
  */
 export const DEFAULT_DEBOUNCE_MS = 250;
 
 /**
- * Мягкий лимит количества событий, отображаемых на одном экране по умолчанию[cite: 14].
+ * Мягкий лимит количества событий, отображаемых на одном экране по умолчанию.
  */
 export const DEFAULT_SOFT_LIMIT = 500;
 
 /**
- * Фабрика создания экземпляра изолированного хранилища событий[cite: 14].
+ * Фабрика создания экземпляра изолированного хранилища событий.
  *
  * @param {(fromDate: number, toDate: number, categories: string[], ranks: string[]|null, skip: number, limit: number, signal: AbortSignal|null) => Promise<Array<Object>>} fetchFn
- *        Функция выполнения сетевого запроса к API[cite: 14].
+ *        Функция выполнения сетевого запроса к API.
  * @param {(state: Object) => void} onStateChange
- *        Функция обратного вызова для уведомления об изменении состояния хранилища[cite: 14].
+ *        Функция обратного вызова для уведомления об изменении состояния хранилища.
  * @param {{
  *   debounceMs?: number,
  *   softLimit?: number
- * }} [options={}] Дополнительные конфигурационные параметры хранилища[cite: 14].
+ * }} [options={}] Дополнительные конфигурационные параметры хранилища.
  * @returns {{
- *   getState: () => Readonly<Object>,
+ *   getState: () => Readonly<{
+ *     events: Array<Object>,
+ *     loadedWindow: { from_date: number, to_date: number } | null,
+ *     loadedShapeKey: string | null,
+ *     loadedZoomIndex: number | null,
+ *     isTruncated: boolean,
+ *     status: 'idle' | 'loading' | 'error',
+ *     error: Error | null
+ *   }>,
  *   requestWindow: (viewportState: Object, ranks?: string[]|null, categories?: string[]) => void,
  *   destroy: () => void
- * }} Публичный интерфейс управления хранилищем событий[cite: 14].
+ * }} Публичный интерфейс управления хранилищем событий.
  */
 export function createEventStore(fetchFn, onStateChange, options = {}) {
     const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     const softLimit = options.softLimit ?? DEFAULT_SOFT_LIMIT;
 
-    // Внутреннее состояние хранилища, инкапсулированное в замыкании[cite: 14]
+    // Внутреннее состояние хранилища, инкапсулированное в замыкании
     let events = [];
     let loadedWindow = null;
     let loadedShapeKey = null;
+    let loadedZoomIndex = null;
     let isTruncated = false;
     let status = 'idle';
     let error = null;
@@ -72,19 +83,20 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
     // Счетчик последовательных сетевых отказов для нарастающей задержки планирования
     let consecutiveFailures = 0;
 
-    // Системные переменные управления жизненным циклом асинхронных запросов[cite: 14]
+    // Системные переменные управления жизненным циклом асинхронных запросов
     let currentRequestId = 0;
     let activeAbortController = null;
     let debounceTimer = null;
     let isDestroyed = false;
 
     /**
-     * Формирует замороженный слепок текущего состояния хранилища[cite: 14].
+     * Формирует замороженный слепок текущего состояния хранилища.
      *
      * @returns {Readonly<{
      *   events: Array<Object>,
      *   loadedWindow: { from_date: number, to_date: number } | null,
      *   loadedShapeKey: string | null,
+     *   loadedZoomIndex: number | null,
      *   isTruncated: boolean,
      *   status: 'idle' | 'loading' | 'error',
      *   error: Error | null
@@ -95,6 +107,7 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
             events: [...events],
             loadedWindow: loadedWindow ? { ...loadedWindow } : null,
             loadedShapeKey,
+            loadedZoomIndex,
             isTruncated,
             status,
             error,
@@ -102,25 +115,30 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
     }
 
     /**
-     * Запрашивает загрузку интервала событий для заданного состояния камеры и фильтров[cite: 14].
+     * Запрашивает загрузку интервала событий для заданного состояния камеры и фильтров.
      * Проверяет покрытие видимой области ранее загруженным окном упреждения,
-     * подавляет частые вызовы и управляет сетевыми запросами[cite: 14].
+     * учитывает масштаб при усечении выборки, подавляет частые вызовы и управляет сетевыми запросами.
      *
-     * @param {{ originTimestamp: number, zoomIndex: number, widthPx: number }} viewportState Состояние камеры[cite: 14].
-     * @param {string[]|null} [ranks=null] Набор запрашиваемых уровней детализации[cite: 14].
-     * @param {string[]} [categories=[]] Набор запрашиваемых категорий событий[cite: 14].
+     * @param {{ originTimestamp: number, zoomIndex: number, widthPx: number }} viewportState Состояние камеры.
+     * @param {string[]|null} [ranks=null] Набор запрашиваемых уровней детализации.
+     * @param {string[]} [categories=[]] Набор запрашиваемых категорий событий.
      */
     function requestWindow(viewportState, ranks = null, categories = []) {
         if (isDestroyed) {
             return;
         }
 
-        // 1. Расчет видимого диапазона экрана (множитель 1) и ключа формы параметров
+        // 1. Расчет видимого диапазона экрана (множитель 1), ключа формы параметров и контекста усечения
         const requiredVisibleWindow = calculateRequiredLoadWindow(viewportState, 1);
         const currentShapeKey = buildRequestShapeKey(ranks, categories);
+        const truncationContext = {
+            isTruncated,
+            currentZoomIndex: viewportState.zoomIndex,
+            loadedZoomIndex,
+        };
 
-        // 2. Проверка покрытия: если видимая область укладывается в загруженное окно, запрос не требуется
-        if (!shouldFetchEvents(requiredVisibleWindow, loadedWindow, currentShapeKey, loadedShapeKey)) {
+        // 2. Проверка покрытия: если видимая область укладывается в загруженное окно (и нет приближения при усечении), запрос не требуется
+        if (!shouldFetchEvents(requiredVisibleWindow, loadedWindow, currentShapeKey, loadedShapeKey, truncationContext)) {
             return;
         }
 
@@ -132,10 +150,11 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
             onStateChange(getState());
         }
 
-        // 4. Расчет упреждающего окна для фактической сетевой загрузки (множитель 3 по умолчанию)
+        // 4. Расчет упреждающего окна для сетевой выборки (множитель 3) и фиксация масштаба запроса
         const windowToLoad = calculateRequiredLoadWindow(viewportState);
+        const requestZoomIndex = viewportState.zoomIndex;
 
-        // 5. Сброс ранее запланированного таймера подавления сетевой активности[cite: 14]
+        // 5. Сброс ранее запланированного таймера подавления сетевой активности
         if (debounceTimer) {
             clearTimeout(debounceTimer);
             debounceTimer = null;
@@ -145,7 +164,7 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
         // Задержка удваивается при каждом отказе (до максимума debounceMs * 2^3 = 2000 мс).
         const actualDelayMs = debounceMs * Math.pow(2, Math.min(consecutiveFailures, 3));
 
-        // 7. Планирование отложенного сетевого запроса с адаптивной задержкой[cite: 14]
+        // 7. Планирование отложенного сетевого запроса с адаптивной задержкой
         debounceTimer = setTimeout(async () => {
             debounceTimer = null;
 
@@ -153,19 +172,19 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
                 return;
             }
 
-            // Прерывание предыдущего незавершенного запроса для разгрузки сети[cite: 14]
+            // Прерывание предыдущего незавершенного запроса для разгрузки сети
             if (activeAbortController) {
                 activeAbortController.abort();
                 activeAbortController = null;
             }
 
-            // Инициализация нового контроллера отмены и инкремент счетчика запросов[cite: 14]
+            // Инициализация нового контроллера отмены и инкремент счетчика запросов
             activeAbortController = new AbortController();
             currentRequestId++;
             const requestId = currentRequestId;
 
             try {
-                // Запрос лимита softLimit + 1 для определения факта усечения выдачи[cite: 14]
+                // Запрос лимита softLimit + 1 для определения факта усечения выдачи
                 const rawEvents = await fetchFn(
                     windowToLoad.from_date,
                     windowToLoad.to_date,
@@ -176,12 +195,12 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
                     activeAbortController.signal
                 );
 
-                // Защита от гонки ответов: если запрос устарел или хранилище уничтожено, результат отбрасывается[cite: 14]
+                // Защита от гонки ответов: если запрос устарел или хранилище уничтожено, результат отбрасывается
                 if (isDestroyed || requestId !== currentRequestId) {
                     return;
                 }
 
-                // Детекция усечения выборки при превышении мягкого лимита[cite: 14]
+                // Детекция усечения выборки при превышении мягкого лимита
                 if (Array.isArray(rawEvents) && rawEvents.length > softLimit) {
                     isTruncated = true;
                     events = rawEvents.slice(0, softLimit);
@@ -190,32 +209,9 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
                     events = Array.isArray(rawEvents) ? rawEvents : [];
                 }
 
-                // Расчет и фиксация параметров зарегистрированного окна загрузки.
-                // Причина: регистрация полного интервала при усечении приводит к тому,
-                // что предикат shouldFetchEvents признаёт правую часть интервала
-                // загруженной и никогда её не догружает.
-                if (isTruncated) {
-                    let coveredTo = windowToLoad.from_date;
-                    if (events.length > 0) {
-                        const lastEvent = events[events.length - 1];
-                        const lastStartDate =
-                            lastEvent && typeof lastEvent.start_date === 'number'
-                                ? lastEvent.start_date
-                                : windowToLoad.from_date;
-
-                        // Вычитаем единицу для исключения неполного среза событий с граничным start_date
-                        const rawCoveredTo = lastStartDate - 1;
-                        // Защита от вырожденного случая, когда все события имеют одинаковый start_date
-                        coveredTo = Math.max(rawCoveredTo, windowToLoad.from_date);
-                    }
-
-                    loadedWindow = Object.freeze({
-                        from_date: windowToLoad.from_date,
-                        to_date: Math.floor(coveredTo),
-                    });
-                } else {
-                    loadedWindow = windowToLoad;
-                }
+                // Безусловная регистрация полного окна упреждения и масштаба запроса
+                loadedWindow = windowToLoad;
+                loadedZoomIndex = requestZoomIndex;
 
                 // Сброс счетчика последовательных отказов после успешного ответа
                 consecutiveFailures = 0;
@@ -226,7 +222,7 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
                 error = null;
                 onStateChange(getState());
             } catch (err) {
-                // Исключение отмены запроса штатно игнорируется[cite: 14]
+                // Исключение отмены запроса штатно игнорируется
                 if (err?.name === 'AbortError' || isDestroyed || requestId !== currentRequestId) {
                     return;
                 }
@@ -234,12 +230,12 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
                 // Инкремент счетчика отказов для нарастающей задержки последующих попыток
                 consecutiveFailures++;
 
-                // При сетевом сбое фиксируем ошибку, сохраняя ранее загруженные события на экране[cite: 14]
+                // При сетевом сбое фиксируем ошибку, сохраняя ранее загруженные события на экране
                 status = 'error';
                 error = err instanceof Error ? err : new Error(String(err));
                 onStateChange(getState());
             } finally {
-                // Очистка контроллера отмены только если данный запрос все еще является актуальным[cite: 14]
+                // Очистка контроллера отмены только если данный запрос все еще является актуальным
                 if (requestId === currentRequestId) {
                     activeAbortController = null;
                 }
@@ -248,8 +244,8 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
     }
 
     /**
-     * Полное уничтожение хранилища с освобождением сетевых ресурсов и памяти[cite: 14].
-     * Блокирует любые последующие мутации состояния и уведомления подписчиков[cite: 14].
+     * Полное уничтожение хранилища с освобождением сетевых ресурсов и памяти.
+     * Блокирует любые последующие мутации состояния и уведомления подписчиков.
      */
     function destroy() {
         isDestroyed = true;
@@ -267,6 +263,8 @@ export function createEventStore(fetchFn, onStateChange, options = {}) {
         events = [];
         loadedWindow = null;
         loadedShapeKey = null;
+        loadedZoomIndex = null;
+        isTruncated = false;
         status = 'idle';
         error = null;
         consecutiveFailures = 0;

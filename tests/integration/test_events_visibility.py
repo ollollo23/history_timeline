@@ -1,7 +1,8 @@
 """
 Интеграционные тесты политики публичной видимости исторических событий.
-Проверяет сокрытие немодерированных записей (status='pending') из публичной выдачи
-и их доступность в списке после перевода в статус 'approved'.
+Проверяет сокрытие немодерированных записей (status='pending') из публичной выдачи,
+их доступность в списке после перевода в статус 'approved', а также возврат 404
+при прямом обращении к немодерированному событию по первичному ключу.
 """
 
 import pytest
@@ -87,3 +88,37 @@ async def test_approved_event_becomes_visible_in_public_list(
     # Подтверждение присутствия одобренного события в публичной выдаче
     returned_ids = [item["id"] for item in list_response.json()]
     assert event_id in returned_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pending_event_direct_get_returns_404(
+    integration_client: AsyncClient,
+) -> None:
+    """
+    Проверка возврата HTTP 404 Not Found при прямом запросе немодерированного события по ID.
+    Убеждается, что внешний клиент не может подтвердить существование черновика
+    или отклоненного события через сканирование первичных ключей.
+    """
+    # Создание события со статусом pending через публичный API
+    payload = {
+        "title": "Черновик для проверки прямого доступа",
+        "start_date": 3000,
+        "category": EventCategory.POLITICS.value,
+        "rank": EventRank.YEAR.value,
+    }
+    create_response = await integration_client.post("/api/v1/events/", json=payload)
+    assert create_response.status_code == status.HTTP_201_CREATED
+
+    created_data = create_response.json()
+    assert created_data["status"] == EventStatus.PENDING.value
+    event_id = created_data["id"]
+
+    # Прямой запрос события по первичному ключу
+    get_response = await integration_client.get(f"/api/v1/events/{event_id}")
+
+    # Проверка строгого возврата 404 Not Found
+    assert get_response.status_code == status.HTTP_404_NOT_FOUND
+    data = get_response.json()
+    assert "detail" in data
+    assert f"Историческое событие с ID {event_id} не найдено" in data["detail"]

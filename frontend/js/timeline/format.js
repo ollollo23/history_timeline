@@ -1,5 +1,5 @@
 /**
- * Модуль форматирования текстовых подписей делений временной шкалы и интервалов.
+ * Модуль форматирования текстовых подписей делений временной шкалы, интервалов и дат событий.
  * Реализует чистое форматирование дат на русском языке без обращения к объектам Date и Intl.
  *
  * СИСТЕМНЫЕ СОГЛАШЕНИЯ И АРХИТЕКТУРНЫЕ ОГРАНИЧЕНИЯ:
@@ -11,6 +11,7 @@
  * 4. Для крупных масштабов (тысячелетия, эпохи, миллионы лет) применяются компактные
  *    суффиксы («тыс. лет до н. э.», «млн лет до н. э.») без паразитных дробных хвостов.
  * 5. Масштаб миллионов лет активируется строго при достижении одного миллиона лет (>= 1 000 000).
+ * 6. Форматирование дат событий адаптируется под доменный ранг детализации (rank).
  */
 
 import { timestampToCivil } from './calendar.js';
@@ -255,4 +256,80 @@ export function formatScaleLevelName(unit, stepCount = 1) {
         default:
             return String(unit);
     }
+}
+
+/**
+ * Форматирование временной метки исторического события в строковое представление
+ * с точностью, соответствующей доменному рангу детализации.
+ *
+ * @param {number} timestamp Временная метка события в секундах Unix.
+ * @param {string} rank Доменный ранг детализации события.
+ * @returns {string} Человекочитаемая текстовая подпись даты события.
+ */
+export function formatEventDate(timestamp, rank) {
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+        return '';
+    }
+
+    const civil = timestampToCivil(timestamp);
+    const yearStr = formatAstronomicalYear(civil.year);
+    const monthStr = MONTH_NAMES_SHORT[civil.month - 1];
+
+    switch (rank) {
+        case 'century':
+        case 'decade':
+        case 'year':
+            return yearStr;
+
+        case 'month':
+            return `${monthStr} ${yearStr}`;
+
+        case 'hour':
+        case 'minute':
+            return `${civil.day} ${monthStr} ${yearStr} ${padZero(civil.hour)}:${padZero(civil.minute)}`;
+
+        case 'second':
+            return `${civil.day} ${monthStr} ${yearStr} ${padZero(civil.hour)}:${padZero(civil.minute)}:${padZero(civil.second)}`;
+
+        case 'day':
+        default:
+            return `${civil.day} ${monthStr} ${yearStr}`;
+    }
+}
+
+/**
+ * Форматирование временного диапазона исторического события в строку вида «Начало — Конец».
+ * Если дата окончания не задана, некорректна, меньше/равна дате начала
+ * либо строковые представления совпадают при заданной точности ранга,
+ * возвращается одиночная дата начала.
+ *
+ * @param {number} startTimestamp Начальная метка времени в секундах Unix.
+ * @param {number|null|undefined} endTimestamp Конечная метка времени в секундах Unix.
+ * @param {string} rank Доменный ранг детализации события.
+ * @returns {string} Человекочитаемый диапазон дат либо одиночная дата начала.
+ */
+export function formatEventDateRange(startTimestamp, endTimestamp, rank) {
+    if (typeof startTimestamp !== 'number' || !Number.isFinite(startTimestamp)) {
+        return '';
+    }
+
+    const startStr = formatEventDate(startTimestamp, rank);
+
+    if (
+        endTimestamp === null ||
+        endTimestamp === undefined ||
+        typeof endTimestamp !== 'number' ||
+        !Number.isFinite(endTimestamp) ||
+        endTimestamp <= startTimestamp
+    ) {
+        return startStr;
+    }
+
+    const endStr = formatEventDate(endTimestamp, rank);
+
+    if (startStr === endStr) {
+        return startStr;
+    }
+
+    return `${startStr} — ${endStr}`;
 }

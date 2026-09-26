@@ -2,43 +2,39 @@
  * Изолированный графический рендерер временной оси на HTML5 Canvas 2D.
  *
  * АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
- * 1. Чистый слой представления: рендерер не владеет состоянием, не слушает события
- *    пользовательского ввода и получает готовый слепок viewportState[cite: 17].
+ * 1. Чистый слой представления: рендерер не владеет состоянием, не выполняет расчет
+ *    компоновки и принимает готовые слепки viewportState и layout.
  * 2. Послойный конвейер отрисовки (Z-Index order):
  *    Фон -> Горизонтальная ось -> Деления сетки и подписи дат ->
- *    -> Маркеры исторических событий -> Маркер текущего времени («Сейчас»)[cite: 17].
- * 3. Адаптивность к HiDPI / Retina: физический размер буфера масштабируется
- *    на window.devicePixelRatio с компенсацией трансформации контекста[cite: 17].
- * 4. Субпиксельная резкость: однопиксельные линии сетки и оси смещаются на 0.5px,
- *    исключая размытие границ растеризатором Canvas[cite: 17].
- * 5. Кэширование стилей темы: палитра вычисляется при инициализации и смене темы,
- *    исключая синхронные reflow-пересчеты внутри анимационного цикла[cite: 17].
- * 6. Оптимизация растеризации маркеров: маркеры группируются по цвету категории
- *    с установкой fillStyle один раз на группу и ограничением экранных координат
- *    интервалов буфером MARKER_RENDER_BOUND_BUFFER_PX.
- * 7. Разрешение коллизий подписей: горизонтальные габариты меток контролируются
- *    через MIN_MAJOR_LABEL_GAP_PX, предотвращая наложение текста дат[cite: 17].
- * 8. Безопасное управление памятью: метод destroy освобождает графический контекст,
- *    отменяет кадры анимации и очищает массив событий[cite: 17].
+ *    -> Многодорожечные маркеры исторических событий и бейджи -> Маркер текущего времени («Сейчас»).
+ * 3. Двухпроходная отрисовка маркеров:
+ *    Проход 1 — пакетная заливка геометрии маркеров по категориям и фоновых подложек бейджей;
+ *    Проход 2 — отрисовка текстовых счетчиков, круговых обводок агрегатов и рамки выделения.
+ * 4. Адаптивность к HiDPI / Retina: физический размер буфера масштабируется
+ *    на window.devicePixelRatio с компенсацией трансформации контекста.
+ * 5. Субпиксельная резкость: однопиксельные линии сетки и оси смещаются на 0.5px,
+ *    исключая размытие границ растеризатором Canvas.
+ * 6. Кэширование стилей темы: палитра вычисляется при инициализации и смене темы,
+ *    исключая синхронные reflow-пересчеты внутри анимационного цикла.
+ * 7. Безопасное управление памятью: метод destroy освобождает графический контекст,
+ *    отменяет кадры анимации и очищает ссылки на отложенные состояния.
  */
 
-import { MIN_MAJOR_LABEL_GAP_PX } from './constants.js';
+import {
+    AGGREGATE_BADGE_MAX_LABEL_COUNT,
+    AGGREGATE_BADGE_RADIUS_PX,
+    AXIS_POSITION_RATIO,
+    MARKER_POINT_RADIUS,
+    MIN_MAJOR_LABEL_GAP_PX,
+    OVERFLOW_BADGE_WIDTH_PX,
+    SELECTION_HIGHLIGHT_WIDTH_PX,
+} from './constants.js';
 import {
     timestampToScreenX,
     zoomIndexToSecondsPerPixel,
 } from './scale.js';
 import { generateTicks } from './ticks.js';
 import { formatTickLabel } from './format.js';
-import { prepareEventMarkers } from './markers.js';
-
-/** Радиус заполненного круга точечного маркера события в пикселях[cite: 17] */
-const MARKER_POINT_RADIUS = 4;
-
-/** Высота прямоугольной полосы интервального события в пикселях[cite: 17] */
-const MARKER_BAR_HEIGHT = 8;
-
-/** Вертикальное смещение базовой линии полосы маркеров вверх от горизонтальной оси[cite: 17] */
-const MARKER_OFFSET_FROM_AXIS = 28;
 
 /**
  * Пиксельный буфер отсечения экранных координат интервальных полос.
@@ -47,10 +43,10 @@ const MARKER_OFFSET_FROM_AXIS = 28;
 export const MARKER_RENDER_BOUND_BUFFER_PX = 50;
 
 /**
- * Динамическое извлечение цветовой палитры темы оформления из вычисленных стилей элемента[cite: 17].
+ * Динамическое извлечение цветовой палитры темы оформления из вычисленных стилей элемента.
  *
- * @param {HTMLCanvasElement} canvasElement Элемент холста Canvas[cite: 17].
- * @returns {Record<string, string>} Объект разрешенных цветов темы и категорий[cite: 17].
+ * @param {HTMLCanvasElement} canvasElement Элемент холста Canvas.
+ * @returns {Record<string, string>} Объект разрешенных цветов темы и категорий.
  */
 export function resolveThemePalette(canvasElement) {
     const computed = window.getComputedStyle(canvasElement);
@@ -76,36 +72,37 @@ export function resolveThemePalette(canvasElement) {
 }
 
 /**
- * Фабрика создания изолированного графического рендерера таймлайна[cite: 17].
+ * Фабрика создания изолированного графического рендерера таймлайна.
  *
- * @param {HTMLCanvasElement} canvasElement Элемент Canvas для отрисовки[cite: 17].
+ * @param {HTMLCanvasElement} canvasElement Элемент Canvas для отрисовки.
  * @returns {{
- *   render: (viewportState: Object) => void,
- *   requestRender: (viewportState: Object) => void,
- *   setEvents: (events: Array<Object>) => void,
+ *   render: (viewportState: Object, layout?: Object | null) => void,
+ *   requestRender: (viewportState: Object, layout?: Object | null) => void,
+ *   setSelection: (eventId: number | null) => void,
  *   updateThemePalette: () => void,
  *   destroy: () => void
- * }} Интерфейс управления рендерером[cite: 17].
+ * }} Интерфейс управления рендерером.
  */
 export function createTimelineRenderer(canvasElement) {
     let ctx = canvasElement.getContext('2d');
     let animationFrameId = null;
     let pendingState = null;
+    let pendingLayout = null;
     let currentDpr = 1;
     let lastRenderedWidth = 0;
     let lastRenderedHeight = 0;
 
-    // Массив загруженных исторических событий, сохраняемый в замыкании для отрисовки[cite: 17]
-    let currentEvents = [];
+    // Идентификатор выбранного исторического события для подсветки активного маркера
+    let selectedEventId = null;
 
-    // Первичное кэширование палитры темы для предотвращения синхронного reflow на каждом кадре[cite: 17]
+    // Первичное кэширование палитры темы для предотвращения синхронного reflow на каждом кадре
     let palette = resolveThemePalette(canvasElement);
 
     /**
-     * Конфигурация физического и логического разрешения холста с учетом Retina/HiDPI[cite: 17].
+     * Конфигурация физического и логического разрешения холста с учетом Retina/HiDPI.
      *
-     * @param {number} widthPx Логическая ширина холста[cite: 17].
-     * @param {number} heightPx Логическая высота холста[cite: 17].
+     * @param {number} widthPx Логическая ширина холста.
+     * @param {number} heightPx Логическая высота холста.
      */
     function setupCanvasResolution(widthPx, heightPx) {
         if (!canvasElement || !ctx) {
@@ -117,24 +114,25 @@ export function createTimelineRenderer(canvasElement) {
         lastRenderedWidth = widthPx;
         lastRenderedHeight = heightPx;
 
-        // Физический размер растрового буфера[cite: 17]
+        // Физический размер растрового буфера
         canvasElement.width = Math.floor(widthPx * dpr);
         canvasElement.height = Math.floor(heightPx * dpr);
 
-        // Логический размер отображения в CSS-пикселях[cite: 17]
+        // Логический размер отображения в CSS-пикселях
         canvasElement.style.width = `${widthPx}px`;
         canvasElement.style.height = `${heightPx}px`;
 
-        // Сброс матрицы трансформации и масштабирование под плотность пикселей экрана[cite: 17]
+        // Сброс матрицы трансформации и масштабирование под плотность пикселей экрана
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
     /**
-     * Непосредственное выполнение команд послойной отрисовки кадра по переданному состоянию[cite: 17].
+     * Непосредственное выполнение команд послойной отрисовки кадра по переданному состоянию.
      *
      * @param {Readonly<{originTimestamp: number, zoomIndex: number, widthPx: number, heightPx: number}>} viewportState
+     * @param {Object|null} [layout=null] Готовый слепок пространственной компоновки дорожек.
      */
-    function renderImmediate(viewportState) {
+    function renderImmediate(viewportState, layout = null) {
         if (!ctx || !canvasElement) {
             return;
         }
@@ -147,7 +145,7 @@ export function createTimelineRenderer(canvasElement) {
 
         const dpr = window.devicePixelRatio || 1;
 
-        // Обновление физических размеров буфера при изменении геометрии или плотности экрана[cite: 17]
+        // Обновление физических размеров буфера при изменении геометрии или плотности экрана
         if (
             widthPx !== lastRenderedWidth ||
             heightPx !== lastRenderedHeight ||
@@ -156,14 +154,14 @@ export function createTimelineRenderer(canvasElement) {
             setupCanvasResolution(widthPx, heightPx);
         }
 
-        // 1. Очистка рабочей области цветом основного фона темы из кэшированной палитры[cite: 17]
+        // 1. Очистка рабочей области цветом основного фона темы из кэшированной палитры
         ctx.fillStyle = palette.bgPrimary;
         ctx.fillRect(0, 0, widthPx, heightPx);
 
-        // 2. Расчет базовой горизонтальной линии оси (65% высоты холста)[cite: 17]
-        const axisY = Math.floor(heightPx * 0.65);
+        // 2. Расчет базовой горизонтальной линии оси с использованием нормативной константы
+        const axisY = Math.floor(heightPx * AXIS_POSITION_RATIO);
 
-        // 3. Отрисовка основной горизонтальной оси[cite: 17]
+        // 3. Отрисовка основной горизонтальной оси
         ctx.beginPath();
         ctx.strokeStyle = palette.borderColor;
         ctx.lineWidth = 1;
@@ -171,29 +169,29 @@ export function createTimelineRenderer(canvasElement) {
         ctx.lineTo(widthPx, axisY + 0.5);
         ctx.stroke();
 
-        // 4. Генерация делений сетки на основе текущего масштаба и границ[cite: 17]
+        // 4. Генерация делений сетки на основе текущего масштаба и границ
         const ticks = generateTicks(viewportState);
 
-        // Настройка типографики для подписей делений[cite: 17]
+        // Настройка типографики для подписей делений
         ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
 
-        // Правая граница последней успешно отрисованной крупной текстовой подписи[cite: 17]
+        // Правая граница последней успешно отрисованной крупной текстовой подписи
         let lastMajorLabelRight = -Infinity;
 
-        // 5. Отрисовка вертикальных делений сетки и текстовых подписей с контролем коллизий[cite: 17]
+        // 5. Отрисовка вертикальных делений сетки и текстовых подписей с контролем коллизий
         for (let i = 0; i < ticks.length; i++) {
             const tick = ticks[i];
             const x = Math.floor(tick.screenX) + 0.5;
 
-            // Пропуск отметок, выходящих за экранные пределы видимости[cite: 17]
+            // Пропуск отметок, выходящих за экранные пределы видимости
             if (x < -50 || x > widthPx + 50) {
                 continue;
             }
 
             if (tick.isMajor) {
-                // Крупное деление: штрих 16px вверх от оси отрисовывается безусловно[cite: 17]
+                // Крупное деление: штрих 16px вверх от оси отрисовывается безусловно
                 ctx.save();
                 ctx.beginPath();
                 ctx.strokeStyle = palette.borderColor;
@@ -202,26 +200,26 @@ export function createTimelineRenderer(canvasElement) {
                 ctx.lineTo(x, axisY);
                 ctx.stroke();
 
-                // Формирование текстовой подписи с передачей физического шага деления[cite: 17]
+                // Формирование текстовой подписи с передачей физического шага деления
                 const label = formatTickLabel(tick.timestamp, tick.unit, tick.step);
                 const textWidth = ctx.measureText(label).width;
 
-                // Расчет левой границы центрированного текста подписи[cite: 17]
+                // Расчет левой границы центрированного текста подписи
                 const labelLeft = x - textWidth / 2;
 
-                // Проверка условия отсутствия коллизии с учетом минимального экранного зазора[cite: 17]
+                // Проверка условия отсутствия коллизии с учетом минимального экранного зазора
                 if (labelLeft >= lastMajorLabelRight + MIN_MAJOR_LABEL_GAP_PX) {
                     ctx.fillStyle = palette.textSecondary;
                     ctx.globalAlpha = tick.opacity;
                     ctx.fillText(label, x, axisY + 6);
 
-                    // Фиксация правой границы для следующей подписи[cite: 17]
+                    // Фиксация правой границы для следующей подписи
                     lastMajorLabelRight = x + textWidth / 2;
                 }
 
                 ctx.restore();
             } else {
-                // Мелкое деление: штрих 8px вверх от оси с учетом прозрачности перехода[cite: 17]
+                // Мелкое деление: штрих 8px вверх от оси с учетом прозрачности перехода
                 ctx.save();
                 ctx.beginPath();
                 ctx.strokeStyle = palette.borderColor;
@@ -234,72 +232,185 @@ export function createTimelineRenderer(canvasElement) {
             }
         }
 
-        // 6. Отрисовка маркеров исторических событий (поверх сетки делений)[cite: 17]
-        if (currentEvents.length > 0) {
-            const spp = zoomIndexToSecondsPerPixel(zoomIndex);
-            const markers = prepareEventMarkers(currentEvents, originTimestamp, spp, widthPx);
-            const markerY = axisY - MARKER_OFFSET_FROM_AXIS;
+        // 6. Отрисовка маркеров исторических событий по переданной пространственной компоновке
+        if (layout) {
+            const hasPlaced = layout.placedMarkers && layout.placedMarkers.length > 0;
+            const hasOverflow = layout.overflowMarkers && layout.overflowMarkers.length > 0;
+            const hasAggregate = layout.aggregateMarkers && layout.aggregateMarkers.length > 0;
 
-            if (markers.length > 0) {
-                // Группировка маркеров по переменной темы оформления для минимизации переключений контекста
-                const markerGroups = new Map();
-                for (let i = 0; i < markers.length; i++) {
-                    const marker = markers[i];
-                    let group = markerGroups.get(marker.themeVariable);
-                    if (!group) {
-                        group = [];
-                        markerGroups.set(marker.themeVariable, group);
-                    }
-                    group.push(marker);
-                }
-
-                // Единое сохранение состояния графического контекста для всей фазы отрисовки маркеров
+            if (hasPlaced || hasOverflow || hasAggregate) {
+                // --- ПРОХОД 1: Заливка геометрии маркеров и подложек бейджей ---
                 ctx.save();
 
-                // Примечание: порядок наложения перекрывающихся маркеров становится цветовым,
-                // а не строго хронологическим; вертикальное стекирование и разрешение
-                // пространственных коллизий относятся к шагу 3 дорожной карты.
-                for (const [themeVariable, groupMarkers] of markerGroups.entries()) {
-                    // Разрешение цвета категории один раз для всей группы
-                    const markerColor =
-                        palette[themeVariable] ||
-                        palette['--color-category-other'] ||
-                        palette.colorAccent;
+                // 6.1. Заливка размещенных маркеров с группировкой по категориям
+                if (hasPlaced) {
+                    const markerGroups = new Map();
+                    for (let i = 0; i < layout.placedMarkers.length; i++) {
+                        const marker = layout.placedMarkers[i];
+                        let group = markerGroups.get(marker.themeVariable);
+                        if (!group) {
+                            group = [];
+                            markerGroups.set(marker.themeVariable, group);
+                        }
+                        group.push(marker);
+                    }
 
-                    ctx.fillStyle = markerColor;
+                    for (const [themeVariable, groupMarkers] of markerGroups.entries()) {
+                        const markerColor =
+                            palette[themeVariable] ||
+                            palette['--color-category-other'] ||
+                            palette.colorAccent;
 
-                    for (let j = 0; j < groupMarkers.length; j++) {
-                        const marker = groupMarkers[j];
+                        ctx.fillStyle = markerColor;
 
-                        if (marker.isPoint) {
-                            // Точечное событие или вырожденный интервал: заполненный круг
-                            ctx.beginPath();
-                            ctx.arc(marker.screenX, markerY, MARKER_POINT_RADIUS, 0, Math.PI * 2);
-                            ctx.fill();
-                        } else {
-                            // Интервальное событие: отсечение экранных границ полосы для разгрузки растеризатора
-                            const left = Math.max(marker.screenX, -MARKER_RENDER_BOUND_BUFFER_PX);
-                            const right = Math.min(
-                                marker.screenX + marker.widthPx,
-                                widthPx + MARKER_RENDER_BOUND_BUFFER_PX
-                            );
-                            const clampedWidth = right - left;
+                        for (let j = 0; j < groupMarkers.length; j++) {
+                            const marker = groupMarkers[j];
+                            const centerY = marker.laneY + marker.laneHeight / 2;
 
-                            // Пропуск отрисовки полосы с нулевой или отрицательной протяженностью
-                            if (clampedWidth > 0) {
-                                const barY = markerY - MARKER_BAR_HEIGHT / 2;
-                                ctx.fillRect(left, barY, clampedWidth, MARKER_BAR_HEIGHT);
+                            if (marker.isPoint) {
+                                // Точечное событие: центрированный круг на середине дорожки
+                                ctx.beginPath();
+                                ctx.arc(marker.screenX, centerY, MARKER_POINT_RADIUS, 0, Math.PI * 2);
+                                ctx.fill();
+                            } else {
+                                // Интервальное событие: отсечение экранных границ полосы
+                                const left = Math.max(marker.screenX, -MARKER_RENDER_BOUND_BUFFER_PX);
+                                const right = Math.min(
+                                    marker.screenX + marker.widthPx,
+                                    widthPx + MARKER_RENDER_BOUND_BUFFER_PX
+                                );
+                                const clampedWidth = right - left;
+
+                                if (clampedWidth > 0) {
+                                    ctx.fillRect(left, marker.laneY, clampedWidth, marker.laneHeight);
+                                }
                             }
                         }
                     }
                 }
 
-                // Восстановление исходного состояния графического контекста
+                // 6.2. Отрисовка фоновых подложек плашек переполнения
+                if (hasOverflow) {
+                    ctx.fillStyle = palette['--color-category-other'] || '#64748b';
+                    for (let i = 0; i < layout.overflowMarkers.length; i++) {
+                        const marker = layout.overflowMarkers[i];
+                        const badgeWidth = marker.widthPx || OVERFLOW_BADGE_WIDTH_PX;
+                        const halfWidth = badgeWidth / 2;
+                        ctx.fillRect(
+                            marker.screenX - halfWidth,
+                            marker.laneY,
+                            badgeWidth,
+                            marker.laneHeight
+                        );
+                    }
+                }
+
+                // 6.3. Отрисовка фоновых подложек круговых бейджей агрегатов
+                if (hasAggregate) {
+                    ctx.fillStyle = palette.bgSecondary || '#1a1a1e';
+                    for (let i = 0; i < layout.aggregateMarkers.length; i++) {
+                        const marker = layout.aggregateMarkers[i];
+                        const centerY = marker.laneY + marker.laneHeight / 2;
+                        ctx.beginPath();
+                        ctx.arc(marker.screenX, centerY, AGGREGATE_BADGE_RADIUS_PX, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                ctx.restore();
+
+                // --- ПРОХОД 2: Типографика бейджей и контуры выделения ---
+                ctx.save();
+
+                // 6.4. Обводка и нанесение счетчиков на бейджи агрегатов
+                if (hasAggregate) {
+                    ctx.strokeStyle = palette.colorAccent;
+                    ctx.lineWidth = 1.5;
+                    ctx.fillStyle = palette.textPrimary;
+                    ctx.font = '9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    for (let i = 0; i < layout.aggregateMarkers.length; i++) {
+                        const marker = layout.aggregateMarkers[i];
+                        const centerY = marker.laneY + marker.laneHeight / 2;
+
+                        ctx.beginPath();
+                        ctx.arc(marker.screenX, centerY, AGGREGATE_BADGE_RADIUS_PX, 0, Math.PI * 2);
+                        ctx.stroke();
+
+                        const badgeText =
+                            marker.count > AGGREGATE_BADGE_MAX_LABEL_COUNT
+                                ? '99+'
+                                : String(marker.count);
+                        ctx.fillText(badgeText, marker.screenX, centerY);
+                    }
+                }
+
+                // 6.5. Нанесение текстовых счетчиков на плашки переполнения
+                if (hasOverflow) {
+                    ctx.fillStyle = palette.textPrimary;
+                    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    for (let i = 0; i < layout.overflowMarkers.length; i++) {
+                        const marker = layout.overflowMarkers[i];
+                        const centerY = marker.laneY + marker.laneHeight / 2;
+                        ctx.fillText('+' + marker.count, marker.screenX, centerY);
+                    }
+                }
+
+                // 6.6. Отрисовка контура активного выделения
+                if (selectedEventId !== null && hasPlaced) {
+                    const selectedMarker = layout.placedMarkers.find(
+                        (m) => m.event && m.event.id === selectedEventId
+                    );
+
+                    if (selectedMarker) {
+                        ctx.strokeStyle = palette.colorAccent;
+                        ctx.lineWidth = SELECTION_HIGHLIGHT_WIDTH_PX;
+
+                        const centerY = selectedMarker.laneY + selectedMarker.laneHeight / 2;
+
+                        if (selectedMarker.isPoint) {
+                            ctx.beginPath();
+                            ctx.arc(
+                                selectedMarker.screenX,
+                                centerY,
+                                MARKER_POINT_RADIUS + 2,
+                                0,
+                                Math.PI * 2
+                            );
+                            ctx.stroke();
+                        } else {
+                            const left = Math.max(
+                                selectedMarker.screenX,
+                                -MARKER_RENDER_BOUND_BUFFER_PX
+                            );
+                            const right = Math.min(
+                                selectedMarker.screenX + selectedMarker.widthPx,
+                                widthPx + MARKER_RENDER_BOUND_BUFFER_PX
+                            );
+                            const clampedWidth = right - left;
+
+                            if (clampedWidth > 0) {
+                                ctx.strokeRect(
+                                    left - 1,
+                                    selectedMarker.laneY - 1,
+                                    clampedWidth + 2,
+                                    selectedMarker.laneHeight + 2
+                                );
+                            }
+                        }
+                    }
+                }
+
                 ctx.restore();
             }
         }
 
-        // 7. Отрисовка маркера текущего момента времени («Сейчас») поверх всех слоев[cite: 17]
+        // 7. Отрисовка маркера текущего момента времени («Сейчас») поверх всех слоев
         const nowTs = Math.floor(Date.now() / 1000);
         const spp = zoomIndexToSecondsPerPixel(zoomIndex);
         const nowX = timestampToScreenX(nowTs, originTimestamp, spp);
@@ -309,7 +420,7 @@ export function createTimelineRenderer(canvasElement) {
 
             ctx.save();
 
-            // Вертикальная акцентная линия текущего времени[cite: 17]
+            // Вертикальная акцентная линия текущего времени
             ctx.beginPath();
             ctx.strokeStyle = palette.colorAccent;
             ctx.lineWidth = 1;
@@ -318,7 +429,7 @@ export function createTimelineRenderer(canvasElement) {
             ctx.lineTo(markerX, heightPx);
             ctx.stroke();
 
-            // Информационный бейдж «Сейчас» в верхней части холста[cite: 17]
+            // Информационный бейдж «Сейчас» в верхней части холста
             const badgeText = 'Сейчас';
             const badgeWidth = 44;
             const badgeHeight = 16;
@@ -340,25 +451,17 @@ export function createTimelineRenderer(canvasElement) {
         }
     }
 
-    /**
-     * Обновляет локальный массив исторических событий для отрисовки[cite: 17].
-     * Не вызывает немедленного рендеринга; обновление кадра инициируется через render или requestRender[cite: 17].
-     *
-     * @param {Array<Object>} events Массив загруженных доменных объектов событий[cite: 17].
-     */
-    function setEvents(events) {
-        currentEvents = Array.isArray(events) ? events : [];
-    }
-
     return {
         /**
-         * Запрос асинхронной перерисовки в следующем кадре анимации[cite: 17].
-         * Выполняет батчинг частых вызовов в пределах одного кадра requestAnimationFrame[cite: 17].
+         * Запрос асинхронной перерисовки в следующем кадре анимации.
+         * Выполняет батчинг частых вызовов в пределах одного кадра requestAnimationFrame.
          *
-         * @param {Object} viewportState Слепок состояния области просмотра[cite: 17].
+         * @param {Object} viewportState Слепок состояния области просмотра.
+         * @param {Object|null} [layout=null] Готовый слепок пространственной компоновки.
          */
-        requestRender(viewportState) {
+        requestRender(viewportState, layout = null) {
             pendingState = viewportState;
+            pendingLayout = layout;
 
             if (animationFrameId !== null) {
                 return;
@@ -367,32 +470,37 @@ export function createTimelineRenderer(canvasElement) {
             animationFrameId = requestAnimationFrame(() => {
                 animationFrameId = null;
                 if (pendingState) {
-                    renderImmediate(pendingState);
+                    renderImmediate(pendingState, pendingLayout);
                 }
             });
         },
 
         /**
-         * Немедленная синхронная перерисовка холста с отменой отложенного кадра[cite: 17].
+         * Немедленная синхронная перерисовка холста с отменой отложенного кадра.
          *
-         * @param {Object} viewportState Слепок состояния области просмотра[cite: 17].
+         * @param {Object} viewportState Слепок состояния области просмотра.
+         * @param {Object|null} [layout=null] Готовый слепок пространственной компоновки.
          */
-        render(viewportState) {
+        render(viewportState, layout = null) {
             if (animationFrameId !== null) {
                 cancelAnimationFrame(animationFrameId);
                 animationFrameId = null;
             }
-            renderImmediate(viewportState);
+            renderImmediate(viewportState, layout);
         },
 
         /**
-         * Установка массива событий для последующей отрисовки[cite: 17].
+         * Установка идентификатора выбранного события для отображения контура активного выделения.
+         *
+         * @param {number|null} eventId Идентификатор выбранного события либо null для сброса.
          */
-        setEvents,
+        setSelection(eventId) {
+            selectedEventId = eventId;
+        },
 
         /**
          * Принудительное обновление кэшированной цветовой палитры темы оформления
-         * (вызывается при динамическом переключении тем оформления приложения)[cite: 17].
+         * (вызывается при динамическом переключении тем оформления приложения).
          */
         updateThemePalette() {
             if (canvasElement) {
@@ -401,17 +509,18 @@ export function createTimelineRenderer(canvasElement) {
         },
 
         /**
-         * Полная утилизация рендерера и освобождение системных ресурсов[cite: 17].
+         * Полная утилизация рендерера и освобождение системных ресурсов.
          */
         destroy() {
             if (animationFrameId !== null) {
                 cancelAnimationFrame(animationFrameId);
                 animationFrameId = null;
             }
-            currentEvents = [];
+            selectedEventId = null;
             canvasElement = null;
             ctx = null;
             pendingState = null;
+            pendingLayout = null;
         },
     };
 }
