@@ -814,3 +814,96 @@ async def test_range_query_collapsed_count_populated_for_identity_map_objects(
     )
     p_res = next(e for e in events if e.id == parent.id)
     assert p_res.collapsed_children_count == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_range_query_collapsed_count_respects_categories(
+    db_session: AsyncSession,
+) -> None:
+    """
+    Проверка корректности подсчета свернутых дочерних событий при различных значениях фильтра категорий:
+    - При указании categories дочерние события исключенных категорий отсекаются из подсчета;
+    - При categories=None учитываются скрытые потомки всех направлений;
+    - При передаче нескольких категорий подсчитываются потомки всех запрошенных категорий.
+    """
+    # 1. Создание родительского события в категории culture
+    parent = await create_test_event(
+        session=db_session,
+        title="Родитель культура",
+        rank=EventRank.YEAR.value,
+        category=EventCategory.CULTURE.value,
+        start_date=1000,
+        end_date=2000,
+        status=EventStatus.APPROVED.value,
+    )
+
+    # 2. Создание двух подтвержденных потомков категории culture ранга day
+    await create_test_event(
+        session=db_session,
+        title="Потомок культура 1",
+        parent_id=parent.id,
+        rank=EventRank.DAY.value,
+        category=EventCategory.CULTURE.value,
+        start_date=1100,
+        end_date=1200,
+        status=EventStatus.APPROVED.value,
+    )
+    await create_test_event(
+        session=db_session,
+        title="Потомок культура 2",
+        parent_id=parent.id,
+        rank=EventRank.DAY.value,
+        category=EventCategory.CULTURE.value,
+        start_date=1300,
+        end_date=1400,
+        status=EventStatus.APPROVED.value,
+    )
+
+    # 3. Создание одного подтвержденного потомка категории politics ранга day
+    await create_test_event(
+        session=db_session,
+        title="Потомок политика",
+        parent_id=parent.id,
+        rank=EventRank.DAY.value,
+        category=EventCategory.POLITICS.value,
+        start_date=1500,
+        end_date=1600,
+        status=EventStatus.APPROVED.value,
+    )
+
+    # Запрос 1: фильтрация только по категории culture (должны быть учтены только 2 потомка culture)
+    events_culture_only = await get_events_in_range(
+        session=db_session,
+        from_date=500,
+        to_date=2500,
+        ranks=["century", "decade", "year", "month"],
+        categories=[EventCategory.CULTURE.value],
+        status=EventStatus.APPROVED.value,
+    )
+    p_res1 = next(e for e in events_culture_only if e.id == parent.id)
+    assert p_res1.collapsed_children_count == 2
+
+    # Запрос 2: без фильтрации по категориям (categories=None, должны быть учтены все 3 потомка)
+    events_all_categories = await get_events_in_range(
+        session=db_session,
+        from_date=500,
+        to_date=2500,
+        ranks=["century", "decade", "year", "month"],
+        categories=None,
+        status=EventStatus.APPROVED.value,
+    )
+    p_res2 = next(e for e in events_all_categories if e.id == parent.id)
+    assert p_res2.collapsed_children_count == 3
+
+    # Запрос 3: фильтрация по категориям culture и politics (должны быть учтены все 3 потомка)
+    events_both_categories = await get_events_in_range(
+        session=db_session,
+        from_date=500,
+        to_date=2500,
+        ranks=["century", "decade", "year", "month"],
+        categories=[EventCategory.CULTURE.value, EventCategory.POLITICS.value],
+        status=EventStatus.APPROVED.value,
+    )
+    p_res3 = next(e for e in events_both_categories if e.id == parent.id)
+    assert p_res3.collapsed_children_count == 3

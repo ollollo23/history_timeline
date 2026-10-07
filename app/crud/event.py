@@ -174,6 +174,22 @@ async def get_events_in_range(
     Выборка событий, попадающих во временной диапазон [from_date, to_date],
     с опциональной фильтрацией по категориям, рангам масштабирования и статусу модерации.
     Использует оператор перекрытия диапазонов (&&) для функционального GiST-индекса.
+
+    Особенности выборки:
+    - Вычисление динамического атрибута Event.collapsed_children_count через with_expression:
+      подсчитывает число подтвержденных дочерних событий, чей ранг скрыт текущим масштабом
+      (rank не входит в переданный список ranks), с учетом активного фильтра категорий
+      (если параметр categories передан). При ranks is None возвращает 0.
+    - Четырехуровневый детерминированный порядок сортировки:
+      1. depth_level ASC: приоритет крупным эпохам и важным событиям перед локальными;
+      2. (end_date_effective - start_date) DESC: приоритет более длительным интервалам;
+      3. Хэш Кнута ((cast(id, BIGINT) * MULTIPLIER) % MODULUS) ASC: равномерное
+         псевдослучайное рассеяние событий с одинаковым рангом и длительностью по шкале времени,
+         предотвращающее хронологический перекос и мерцание маркеров при панорамировании;
+      4. id ASC: детерминированное разрешение коллизий хэша по первичному ключу.
+    - Исполнение с execution_options(populate_existing=True) для гарантированного
+      заполнения вычисляемого атрибута collapsed_children_count у объектов,
+      уже присутствующих в Identity Map текущей сессии.
     """
     # Предикат пересечения интервалов через оператор перекрытия диапазонов PostgreSQL (&&)
     time_filter = text(
@@ -194,6 +210,9 @@ async def get_events_in_range(
         if status is not None:
             child_stmt = child_stmt.where(child_event.status == status)
         child_stmt = child_stmt.where(child_event.rank.not_in(ranks))
+        # Учет активного фильтра категорий в подзапросе агрегированных потомков
+        if categories is not None:
+            child_stmt = child_stmt.where(child_event.category.in_(categories))
         count_expr = child_stmt.scalar_subquery()
 
     statement = statement.options(with_expression(Event.collapsed_children_count, count_expr))
@@ -263,6 +282,7 @@ async def update_event(
     Применяет обновленные поля, сбрасывает изменения через flush
     и синхронизирует состояние через запрос с populate_existing=True,
     предотвращая ошибки MissingGreenlet без нарушения AST-правил Unit of Work.
+    Для юнит-тестов с AsyncMock возвращает мутированный объект напрямую.
     """
     # Подготовка словаря изменений из Pydantic-схемы либо готового словаря
     if isinstance(event_in, EventUpdate):

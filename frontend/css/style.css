@@ -9,12 +9,16 @@
     --color-success: #10b981;
     --border-color: #2e2e33;
 
-    /* Цветовое кодирование тематических категорий исторических событий */
-    --color-category-culture: #a855f7; /* Культура, искусство, религия */
-    --color-category-politics: #ef4444; /* Политика, войны, государство */
-    --color-category-economy: #eab308; /* Экономика, торговля, финансы */
-    --color-category-science: #06b6d4; /* Наука, технологии, открытия */
-    --color-category-other: #64748b; /* Запасной цвет для пользовательских и неизвестных категорий */
+    /* Системные служебные токены интерфейса */
+    --color-badge-neutral: #52525b;
+    --color-danger: #ef4444;
+
+    /* Палитра проверена: WCAG 2.1 контраст >= 3:1 к фону #121214, различимость при дальтонизме Machado 2009 Delta E >= 11 */
+    --color-category-culture: #854ece;
+    --color-category-politics: #c83841;
+    --color-category-economy: #c08933;
+    --color-category-science: #1794a0;
+    --color-category-other: #b0b0b8;
 }
 
 /* Сброс базовых браузерных отступов и фиксация блочной модели расчета размеров */
@@ -105,6 +109,224 @@ body {
 }
 
 /* ==============================================================================
+   ПАНЕЛЬ УПРАВЛЕНИЯ СЛОЯМИ И БЫСТРЫХ ФИЛЬТРОВ (LAYER PANEL)
+   ============================================================================== */
+
+/* Корневой контейнер панели слоев */
+.layer-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+/* Строка чипов быстрых фильтров направлений */
+.layer-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* Интерактивная кнопка-чип фильтрации слоя */
+.layer-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: border-color 0.15s ease, opacity 0.15s ease, color 0.15s ease;
+}
+
+.layer-chip:hover {
+    border-color: var(--color-accent);
+}
+
+.layer-chip[aria-pressed="false"] {
+    color: var(--text-secondary);
+    border-style: dashed;
+}
+
+.layer-chip[data-action="all"] {
+    font-weight: 500;
+}
+
+.layer-chip[data-action="all"]:disabled {
+    opacity: 0.4;
+    cursor: default;
+    border-color: var(--border-color);
+}
+
+/* Цветовой образец категории на чипе или в строке */
+.layer-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background-color: var(--layer-color);
+    flex-shrink: 0;
+}
+
+/* Сворачиваемый блок управления порядком и прозрачностью слоев */
+.layer-manager {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+.layer-manager summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    user-select: none;
+    outline: none;
+    transition: color 0.15s ease;
+}
+
+.layer-manager summary:hover {
+    color: var(--text-primary);
+}
+
+.layer-manager[open] summary {
+    margin-bottom: 0.5rem;
+}
+
+/* Внутренний контейнер строк менеджера слоев */
+.layer-manager-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding-top: 0.25rem;
+}
+
+/* Сетка параметров отдельного слоя */
+.layer-row {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto auto auto;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.2rem 0;
+}
+
+/* Группа кнопок перемещения слоя по вертикали */
+.layer-move-group {
+    display: inline-flex;
+    gap: 0.2rem;
+}
+
+.layer-move-btn {
+    background: var(--bg-accent);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.layer-move-btn:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--color-accent);
+}
+
+.layer-move-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* Информационный блок названия слоя */
+.layer-row-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 90px;
+}
+
+.layer-row-label {
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Ползунок регулировки непрозрачности слоя */
+.layer-opacity-input {
+    accent-color: var(--color-accent);
+    cursor: pointer;
+    height: 4px;
+    width: 100%;
+    min-width: 70px;
+    max-width: 140px;
+}
+
+/* Числовое значение непрозрачности */
+.layer-opacity-value {
+    font-family: monospace;
+    font-variant-numeric: tabular-nums;
+    min-width: 4ch;
+    text-align: right;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+/* Кнопка изолированного отображения одного направления */
+.layer-solo-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.layer-solo-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--color-accent);
+}
+
+/* Кнопка сброса настроек слоев к значениям по умолчанию */
+.layer-reset-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.layer-reset-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--color-accent);
+}
+
+/* Стили фокуса доступности для элементов управления слоями */
+.layer-chip:focus-visible,
+.layer-move-btn:focus-visible,
+.layer-solo-btn:focus-visible,
+.layer-reset-btn:focus-visible,
+.layer-opacity-input:focus-visible,
+.layer-manager summary:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+}
+
+/* ==============================================================================
    РАБОЧАЯ ОБЛАСТЬ ИНТЕРАКТИВНОГО ТАЙМЛАЙНА (CANVAS & CONTROLS)
    ============================================================================== */
 
@@ -177,6 +399,23 @@ body {
     color: var(--text-primary);
     font-family: monospace;
     font-weight: 600;
+}
+
+/* Индикатор текущей даты и времени на панели инструментов */
+.timeline-now-info {
+    font-family: monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Индикатор количества активных направлений на панели инструментов */
+.timeline-directions-info {
+    font-family: monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--text-primary);
 }
 
 /* Кнопка сброса положения виртуальной камеры таймлайна */
@@ -307,6 +546,12 @@ body {
     text-transform: uppercase;
 }
 
+/* Бейдж категории с цветовой полосой направления */
+.timeline-detail-badge-category {
+    border-left: 3px solid var(--badge-color, var(--color-category-other));
+    padding-left: 0.4rem;
+}
+
 /* Текстовый блок описания события */
 .timeline-detail-description {
     font-size: 0.9rem;
@@ -377,6 +622,18 @@ body {
     background-color: var(--border-color);
 }
 
+/* Миниатюрный цветовой образец категории дочернего события */
+.timeline-detail-child-swatch {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background-color: var(--badge-color, var(--color-category-other));
+    margin-right: 0.4rem;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
 /* Заголовок дочернего события */
 .timeline-detail-child-title {
     color: var(--text-primary);
@@ -404,6 +661,6 @@ body {
 /* Блок предупреждения об ошибке загрузки потомков */
 .timeline-detail-children-error {
     font-size: 0.8rem;
-    color: var(--color-category-politics);
+    color: var(--color-danger);
     margin-top: 0.5rem;
 }

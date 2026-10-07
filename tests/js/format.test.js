@@ -1,9 +1,10 @@
 /**
- * Модульные тесты форматирования текстовых меток дат, уровней сетки, интервалов и дат событий (format.js).
+ * Модульные тесты форматирования текстовых меток дат, уровней сетки, интервалов, дат событий и часов (format.js).
  * Валидируют исторические суффиксы, астрономический сдвиг нулевого года,
  * компактные формы тысячелетий и миллионов лет без дробных хвостов,
  * полную русскую локализацию всех 23 уровней лестницы TICK_LADDER,
- * а также ранговую точность форматирования дат и диапазонов событий.
+ * ранговую точность форматирования дат и диапазонов событий,
+ * а также форматирование смещения часовых поясов и системного времени для часов.
  *
  * СИСТЕМНЫЕ ПРАВИЛА:
  * 1. Исполнение в среде Node.js под управлением Vitest без зависимостей от DOM и Canvas.
@@ -19,6 +20,8 @@ import {
     formatContextInterval,
     formatEventDate,
     formatEventDateRange,
+    formatUtcOffset,
+    formatClockDateTime,
     padZero,
 } from '../../frontend/js/timeline/format.js';
 import { TICK_LADDER } from '../../frontend/js/timeline/constants.js';
@@ -510,5 +513,52 @@ describe('formatEventDateRange', () => {
         expect(formatEventDateRange(null, tsJan10, 'day')).toBe('');
         expect(formatEventDateRange(NaN, tsJan10, 'day')).toBe('');
         expect(formatEventDateRange('invalid', tsJan10, 'day')).toBe('');
+    });
+});
+
+describe('formatUtcOffset', () => {
+    it('корректно форматирует стандартные и дробные смещения часовых поясов', () => {
+        expect(formatUtcOffset(-180)).toBe('UTC+03:00');
+        expect(formatUtcOffset(0)).toBe('UTC+00:00');
+        expect(formatUtcOffset(300)).toBe('UTC-05:00');
+        expect(formatUtcOffset(-330)).toBe('UTC+05:30');
+    });
+
+    it('использует строгий символ ASCII-дефиса для отрицательных смещений', () => {
+        const formatted = formatUtcOffset(300);
+        expect(formatted).toBe('UTC-05:00');
+        expect(formatted.charCodeAt(3)).toBe(45);
+    });
+
+    it('возвращает UTC+00:00 при невалидных входных данных', () => {
+        expect(formatUtcOffset(NaN)).toBe('UTC+00:00');
+        expect(formatUtcOffset(null)).toBe('UTC+00:00');
+        expect(formatUtcOffset(undefined)).toBe('UTC+00:00');
+        expect(formatUtcOffset('invalid')).toBe('UTC+00:00');
+        expect(formatUtcOffset(Infinity)).toBe('UTC+00:00');
+        expect(formatUtcOffset(-Infinity)).toBe('UTC+00:00');
+    });
+});
+
+describe('formatClockDateTime', () => {
+    it('корректно форматирует дату и время со смещением часового пояса', () => {
+        expect(formatClockDateTime(1790457303000, -180)).toBe('27 сен 2026, 00:15:03');
+        expect(formatClockDateTime(1790457303000, 0)).toBe('26 сен 2026, 21:15:03');
+    });
+
+    it('корректно учитывает високосный день 29 февраля при смене часового пояса', () => {
+        expect(formatClockDateTime(1709251199000, -180)).toBe('1 мар 2024, 02:59:59');
+        expect(formatClockDateTime(1709251199000, 300)).toBe('29 фев 2024, 18:59:59');
+    });
+
+    it('использует смещение 0 по умолчанию при передаче одного аргумента', () => {
+        expect(formatClockDateTime(1790457303000)).toBe('26 сен 2026, 21:15:03');
+    });
+
+    it('возвращает пустую строку при невалидной временной метке', () => {
+        expect(formatClockDateTime(NaN)).toBe('');
+        expect(formatClockDateTime(null)).toBe('');
+        expect(formatClockDateTime(undefined)).toBe('');
+        expect(formatClockDateTime('invalid')).toBe('');
     });
 });

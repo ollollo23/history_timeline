@@ -1,20 +1,22 @@
 /**
  * Модуль математического ядра вертикальной компоновки временной шкалы (Layout Engine).
  * Реализует расчет вместимости и высоты дорожек, позиционирование бейджей скрытых потомков,
- * жадное распределение маркеров со стабилизацией по дорожкам между кадрами
- * и формирование бейджей переполнения.
+ * жадное распределение маркеров со стабилизацией по дорожкам между кадрами,
+ * учет приоритета слоев категорий и формирование бейджей переполнения.
  *
  * АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
  * 1. Чистая функциональная модель: модуль не содержит глобального состояния,
  *    не производит побочных эффектов и не обращается к DOM-дереву или Canvas API.
- * 2. Серверная агрегация: иерархические агрегаты больше не отфильтровываются на клиенте;
+ * 2. Серверная агрегация: иерархические агрегаты не отфильтровываются на клиенте;
  *    бейдж рисуется на основе серверного атрибута collapsed_children_count,
  *    а все загруженные потомки компонуются независимо.
  * 3. Резервирование дорожки переполнения: при maxLanes >= 2 верхняя дорожка выделяется
  *    под бейджи переполнения вытесненных маркеров.
  * 4. Стабилизация дорожек (stickiness): переданный Map previousLaneAssignments
  *    закрепляет дорожку за событием между кадрами панорамирования, если она свободна.
- * 5. Немутабельность: все возвращаемые коллекции и дескрипторы глубоко замораживаются.
+ * 5. Приоритет слоев: внутри одного ранга детализации события более приоритетного слоя
+ *    размещаются ближе к оси времени и вытесняются последними.
+ * 6. Немутабельность: все возвращаемые коллекции и дескрипторы глубоко замораживаются.
  */
 
 import {
@@ -33,6 +35,7 @@ import {
     OVERFLOW_BADGE_WIDTH_PX,
     TIMELINE_CANVAS_HEIGHT_PX,
 } from './constants.js';
+import { normalizeCategoryId } from './categories.js';
 
 /**
  * Упорядоченный список рангов деталей исторических событий по глубине детализации.
@@ -62,39 +65,64 @@ const RANK_PRIORITY_INDEX = Object.freeze(
 );
 
 /**
- * Сравнение приоритета двух маркеров для упорядочивания перед распределением по дорожкам.
+ * Фабрика создания функции сравнения маркеров с опциональным учетом приоритета слоев категорий.
+ *
+ * @param {Map<string, number>|null} [layerPriority=null] Карта приоритетов слоев (0 — наивысший приоритет).
+ * @returns {(markerA: Object, markerB: Object) => number} Компаратор для сортировки маркеров.
+ */
+export function createMarkerPriorityComparator(layerPriority = null) {
+    const hasLayerPriority = layerPriority instanceof Map;
+    const fallbackPriority = hasLayerPriority ? layerPriority.size : 0;
+
+    return function compareMarkers(markerA, markerB) {
+        // 1. Приоритет ранга детализации: крупный ранг имеет меньший индекс (0 для century)
+        const rankA = RANK_PRIORITY_INDEX[markerA.event?.rank] ?? 99;
+        const rankB = RANK_PRIORITY_INDEX[markerB.event?.rank] ?? 99;
+        if (rankA !== rankB) {
+            return rankA - rankB;
+        }
+
+        // 2. Индекс приоритета слоя внутри одного ранга детализации
+        if (hasLayerPriority) {
+            const catA = normalizeCategoryId(markerA.event?.category);
+            const catB = normalizeCategoryId(markerB.event?.category);
+            const priorityA = catA && layerPriority.has(catA) ? layerPriority.get(catA) : fallbackPriority;
+            const priorityB = catB && layerPriority.has(catB) ? layerPriority.get(catB) : fallbackPriority;
+            if (priorityA !== priorityB) {
+                return priorityA - priorityB;
+            }
+        }
+
+        // 3. Экранная ширина габарита: более протяженные события имеют преимущество
+        const widthA = markerA.widthPx || 0;
+        const widthB = markerB.widthPx || 0;
+        if (widthA !== widthB) {
+            return widthB - widthA;
+        }
+
+        // 4. Хронологическое начало: более ранние события размещаются первыми
+        const startA = markerA.event?.start_date ?? 0;
+        const startB = markerB.event?.start_date ?? 0;
+        if (startA !== startB) {
+            return startA - startB;
+        }
+
+        // 5. Идентификатор сущности: обеспечивает строгую детерминированность сортировки
+        const idA = markerA.event?.id ?? 0;
+        const idB = markerB.event?.id ?? 0;
+        return idA - idB;
+    };
+}
+
+/**
+ * Сравнение приоритета двух маркеров по умолчанию без учета приоритета слоев.
+ * Экспортируется для сохранения обратной совместимости интерфейса модуля.
  *
  * @param {Object} markerA Первый маркер.
  * @param {Object} markerB Второй маркер.
  * @returns {number} Отрицательное число, если маркер A приоритетнее B.
  */
-export function compareMarkersByPriority(markerA, markerB) {
-    // 1. Приоритет ранга детализации: крупный ранг имеет меньший индекс (0 для century)
-    const rankA = RANK_PRIORITY_INDEX[markerA.event?.rank] ?? 99;
-    const rankB = RANK_PRIORITY_INDEX[markerB.event?.rank] ?? 99;
-    if (rankA !== rankB) {
-        return rankA - rankB;
-    }
-
-    // 2. Экранная ширина габарита: более протяженные события имеют преимущество
-    const widthA = markerA.widthPx || 0;
-    const widthB = markerB.widthPx || 0;
-    if (widthA !== widthB) {
-        return widthB - widthA;
-    }
-
-    // 3. Хронологическое начало: более ранние события размещаются первыми
-    const startA = markerA.event?.start_date ?? 0;
-    const startB = markerB.event?.start_date ?? 0;
-    if (startA !== startB) {
-        return startA - startB;
-    }
-
-    // 4. Идентификатор сущности: обеспечивает строгую детерминированность сортировки
-    const idA = markerA.event?.id ?? 0;
-    const idB = markerB.event?.id ?? 0;
-    return idA - idB;
-}
+export const compareMarkersByPriority = createMarkerPriorityComparator(null);
 
 /**
  * Расчет геометрической вместимости и параметров вертикальных дорожек маркеров.
@@ -254,7 +282,8 @@ export function computeMarkerLayoutBounds(marker, canvasWidthPx = 1000) {
  * @param {number} canvasWidthPx Полная ширина холста Canvas в пикселях.
  * @param {number} canvasHeightPx Полная высота холста Canvas в пикселях.
  * @param {{
- *   previousLaneAssignments?: Map<number, number>
+ *   previousLaneAssignments?: Map<number, number>,
+ *   layerPriority?: Map<string, number>
  * }} [options={}] Дополнительные параметры компоновки.
  * @returns {Readonly<{
  *   placedMarkers: ReadonlyArray<Object>,
@@ -291,8 +320,11 @@ export function computeTimelineLayout(markers, canvasWidthPx, canvasHeightPx, op
     const allowedLanesForMarkers = maxLanes >= 2 ? maxLanes - 1 : maxLanes;
     const overflowLaneIndex = maxLanes >= 2 ? maxLanes - 1 : 0;
 
-    // 3. Сортировка маркеров по приоритету
-    const sortedCandidates = [...markers].sort(compareMarkersByPriority);
+    // 3. Сортировка маркеров по приоритету с учетом переданных весов слоев
+    const comparator = createMarkerPriorityComparator(
+        options.layerPriority instanceof Map ? options.layerPriority : null
+    );
+    const sortedCandidates = [...markers].sort(comparator);
 
     // 4. Жадное распределение по дорожкам с учетом закрепления дорожек между кадрами
     const lanes = Array.from({ length: allowedLanesForMarkers }, () => []);
@@ -393,6 +425,7 @@ export function computeTimelineLayout(markers, canvasWidthPx, canvasHeightPx, op
                 laneY: pm.laneY,
                 laneHeight: pm.laneHeight,
                 event: pm.event,
+                themeVariable: pm.themeVariable,
             });
         }
     }

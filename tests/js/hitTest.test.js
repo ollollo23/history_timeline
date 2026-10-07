@@ -1,7 +1,8 @@
 /**
  * Модульные тесты пространственной детекции попадания курсора (Hit-Testing).
  * Проверяет попадание в интервальные и точечные маркеры, допуск погрешности,
- * разрешение наложений по площади и строгий приоритет интерактивных целей.
+ * разрешение наложений по площади, строгий приоритет интерактивных целей
+ * и корректность захвата плашек переполнения по соглашению левого края.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -142,6 +143,7 @@ describe('Модуль детекции попадания hitTest.js', () => {
             laneHeight: 16,
         };
 
+        // screenX: 100 обозначает левый край плашки переполнения, охватывающей интервал по X [100..128]
         const overflow = {
             type: 'overflow',
             count: 5,
@@ -173,6 +175,53 @@ describe('Модуль детекции попадания hitTest.js', () => {
         const targetC = resolveCursorTarget(markerOnlyLayout, 100, 28);
         expect(targetC).not.toBeNull();
         expect(targetC.event.id).toBe(10);
+
+        // Шаг Г: Клик в правую половину плашки переполнения (x = 120), находящуюся за пределами радиуса агрегата (100 ± 11)
+        const targetD = resolveCursorTarget(fullLayout, 120, 28);
+        expect(targetD).not.toBeNull();
+        expect(targetD.type).toBe('overflow');
+        expect(targetD.count).toBe(5);
+    });
+
+    it('Сценарий 5.1: детекция плашки переполнения findOverflowAtPoint по левому краю, центру и правой половине', () => {
+        const overflow = {
+            type: 'overflow',
+            count: 5,
+            screenX: 100,
+            widthPx: OVERFLOW_BADGE_WIDTH_PX,
+            laneY: 20,
+            laneHeight: 16,
+            evictedEvents: [],
+        };
+        const layout = createTestLayout([], [overflow], []);
+
+        // Проверка левого края плашки
+        expect(findOverflowAtPoint(layout, 100, 28, 0)).toBe(overflow);
+
+        // Проверка левой половины
+        expect(findOverflowAtPoint(layout, 105, 28, 0)).toBe(overflow);
+
+        // Проверка геометрического центра
+        expect(findOverflowAtPoint(layout, 114, 28, 0)).toBe(overflow);
+
+        // Проверка правой половины плашки
+        expect(findOverflowAtPoint(layout, 120, 28, 0)).toBe(overflow);
+        expect(findOverflowAtPoint(layout, 125, 28, 0)).toBe(overflow);
+
+        // Проверка правого края
+        expect(findOverflowAtPoint(layout, 128, 28, 0)).toBe(overflow);
+
+        // Проверка допуска снаружи (3px от границ)
+        expect(findOverflowAtPoint(layout, 97, 28, HIT_TEST_TOLERANCE_PX)).toBe(overflow);
+        expect(findOverflowAtPoint(layout, 131, 28, HIT_TEST_TOLERANCE_PX)).toBe(overflow);
+        expect(findOverflowAtPoint(layout, 114, 17, HIT_TEST_TOLERANCE_PX)).toBe(overflow);
+        expect(findOverflowAtPoint(layout, 114, 39, HIT_TEST_TOLERANCE_PX)).toBe(overflow);
+
+        // Проверка промаха за пределами допуска (6px от границ)
+        expect(findOverflowAtPoint(layout, 94, 28, HIT_TEST_TOLERANCE_PX)).toBeNull();
+        expect(findOverflowAtPoint(layout, 134, 28, HIT_TEST_TOLERANCE_PX)).toBeNull();
+        expect(findOverflowAtPoint(layout, 114, 13, HIT_TEST_TOLERANCE_PX)).toBeNull();
+        expect(findOverflowAtPoint(layout, 114, 43, HIT_TEST_TOLERANCE_PX)).toBeNull();
     });
 
     it('Сценарий 6: пустая или невалидная раскладка возвращает null без исключения', () => {

@@ -7,17 +7,20 @@
  * 2. Послойный конвейер отрисовки (Z-Index order):
  *    Фон -> Горизонтальная ось -> Деления сетки и подписи дат ->
  *    -> Многодорожечные маркеры исторических событий и бейджи -> Маркер текущего времени («Сейчас»).
- * 3. Двухпроходная отрисовка маркеров:
- *    Проход 1 — пакетная заливка геометрии маркеров по категориям и фоновых подложек бейджей;
+ * 3. Двухпроходная отрисовка маркеров с поддержкой слоев:
+ *    Проход 1 — пакетная заливка геометрии маркеров по группам категорий в порядке drawOrder
+ *    с учетом прозрачности слоев, отрисовка подложек плашек переполнения и бейджей агрегатов;
  *    Проход 2 — отрисовка текстовых счетчиков, круговых обводок агрегатов и рамки выделения.
- * 4. Адаптивность к HiDPI / Retina: физический размер буфера масштабируется
+ * 4. Единое соглашение координат: координата screenX для интервальных маркеров и плашек
+ *    переполнения обозначает их левый край, а текстовые метки центрируются относительно габаритов.
+ * 5. Адаптивность к HiDPI / Retina: физический размер буфера масштабируется
  *    на window.devicePixelRatio с компенсацией трансформации контекста.
- * 5. Субпиксельная резкость: однопиксельные линии сетки и оси смещаются на 0.5px,
+ * 6. Субпиксельная резкость: однопиксельные линии сетки и оси смещаются на 0.5px,
  *    исключая размытие границ растеризатором Canvas.
- * 6. Кэширование стилей темы: палитра вычисляется при инициализации и смене темы,
- *    исключая синхронные reflow-пересчеты внутри анимационного цикла.
- * 7. Безопасное управление памятью: метод destroy освобождает графический контекст,
- *    отменяет кадры анимации и очищает ссылки на отложенные состояния.
+ * 7. Кэширование стилей темы: палитра формируется динамически из реестра категорий при инициализации
+ *    и смене темы, исключая синхронные reflow-пересчеты внутри анимационного цикла.
+ * 8. Безопасное управление памятью: метод destroy освобождает графический контекст,
+ *    отменяет кадры анимации и сбрасывает конфигурацию слоев в состояние по умолчанию.
  */
 
 import {
@@ -35,6 +38,14 @@ import {
 } from './scale.js';
 import { generateTicks } from './ticks.js';
 import { formatTickLabel } from './format.js';
+import {
+    CATEGORY_REGISTRY,
+    FALLBACK_CATEGORY,
+} from './categories.js';
+import {
+    buildLayerRenderConfig,
+    createDefaultLayerState,
+} from './layers.js';
 
 /**
  * Пиксельный буфер отсечения экранных координат интервальных полос.
@@ -44,6 +55,7 @@ export const MARKER_RENDER_BOUND_BUFFER_PX = 50;
 
 /**
  * Динамическое извлечение цветовой палитры темы оформления из вычисленных стилей элемента.
+ * Сопоставляет переменные категорий из единого реестра и системные токены интерфейса.
  *
  * @param {HTMLCanvasElement} canvasElement Элемент холста Canvas.
  * @returns {Record<string, string>} Объект разрешенных цветов темы и категорий.
@@ -56,19 +68,29 @@ export function resolveThemePalette(canvasElement) {
         return val && val.trim() ? val.trim() : fallback;
     };
 
-    return {
+    const palette = {
         bgPrimary: getVar('--bg-primary', '#121214'),
         bgSecondary: getVar('--bg-secondary', '#1a1a1e'),
         textPrimary: getVar('--text-primary', '#f4f4f5'),
         textSecondary: getVar('--text-secondary', '#a1a1aa'),
         colorAccent: getVar('--color-accent', '#3b82f6'),
         borderColor: getVar('--border-color', '#2e2e33'),
-        '--color-category-culture': getVar('--color-category-culture', '#a855f7'),
-        '--color-category-politics': getVar('--color-category-politics', '#ef4444'),
-        '--color-category-economy': getVar('--color-category-economy', '#eab308'),
-        '--color-category-science': getVar('--color-category-science', '#06b6d4'),
-        '--color-category-other': getVar('--color-category-other', '#64748b'),
+        badgeNeutral: getVar('--color-badge-neutral', '#52525b'),
     };
+
+    // Динамическое разрешение цветовых токенов категорий из реестра
+    for (let i = 0; i < CATEGORY_REGISTRY.length; i++) {
+        const cat = CATEGORY_REGISTRY[i];
+        palette[cat.themeVariable] = getVar(cat.themeVariable, cat.fallbackColor);
+    }
+
+    // Разрешение цвета для запасной категории
+    palette[FALLBACK_CATEGORY.themeVariable] = getVar(
+        FALLBACK_CATEGORY.themeVariable,
+        FALLBACK_CATEGORY.fallbackColor
+    );
+
+    return palette;
 }
 
 /**
@@ -79,6 +101,7 @@ export function resolveThemePalette(canvasElement) {
  *   render: (viewportState: Object, layout?: Object | null) => void,
  *   requestRender: (viewportState: Object, layout?: Object | null) => void,
  *   setSelection: (eventId: number | null) => void,
+ *   setLayerRenderConfig: (config: Object | null) => void,
  *   updateThemePalette: () => void,
  *   destroy: () => void
  * }} Интерфейс управления рендерером.
@@ -97,6 +120,9 @@ export function createTimelineRenderer(canvasElement) {
 
     // Первичное кэширование палитры темы для предотвращения синхронного reflow на каждом кадре
     let palette = resolveThemePalette(canvasElement);
+
+    // Текущая конфигурация рендеринга слоев (порядок отрисовки и коэффициенты прозрачности)
+    let currentRenderConfig = buildLayerRenderConfig(createDefaultLayerState());
 
     /**
      * Конфигурация физического и логического разрешения холста с учетом Retina/HiDPI.
@@ -242,7 +268,7 @@ export function createTimelineRenderer(canvasElement) {
                 // --- ПРОХОД 1: Заливка геометрии маркеров и подложек бейджей ---
                 ctx.save();
 
-                // 6.1. Заливка размещенных маркеров с группировкой по категориям
+                // 6.1. Заливка размещенных маркеров с группировкой по категориям и учетом drawOrder
                 if (hasPlaced) {
                     const markerGroups = new Map();
                     for (let i = 0; i < layout.placedMarkers.length; i++) {
@@ -255,49 +281,68 @@ export function createTimelineRenderer(canvasElement) {
                         group.push(marker);
                     }
 
-                    for (const [themeVariable, groupMarkers] of markerGroups.entries()) {
-                        const markerColor =
-                            palette[themeVariable] ||
-                            palette['--color-category-other'] ||
-                            palette.colorAccent;
+                    const drawOrder = currentRenderConfig?.drawOrder || [
+                        FALLBACK_CATEGORY.themeVariable,
+                        ...CATEGORY_REGISTRY.map((c) => c.themeVariable),
+                    ];
 
-                        ctx.fillStyle = markerColor;
+                    for (let i = 0; i < drawOrder.length; i++) {
+                        const themeVariable = drawOrder[i];
+                        const groupMarkers = markerGroups.get(themeVariable);
 
-                        for (let j = 0; j < groupMarkers.length; j++) {
-                            const marker = groupMarkers[j];
-                            const centerY = marker.laneY + marker.laneHeight / 2;
+                        if (groupMarkers && groupMarkers.length > 0) {
+                            const alpha = currentRenderConfig?.alphaByThemeVariable?.[themeVariable] ?? 1.0;
+                            if (alpha <= 0) {
+                                continue;
+                            }
 
-                            if (marker.isPoint) {
-                                // Точечное событие: центрированный круг на середине дорожки
-                                ctx.beginPath();
-                                ctx.arc(marker.screenX, centerY, MARKER_POINT_RADIUS, 0, Math.PI * 2);
-                                ctx.fill();
-                            } else {
-                                // Интервальное событие: отсечение экранных границ полосы
-                                const left = Math.max(marker.screenX, -MARKER_RENDER_BOUND_BUFFER_PX);
-                                const right = Math.min(
-                                    marker.screenX + marker.widthPx,
-                                    widthPx + MARKER_RENDER_BOUND_BUFFER_PX
-                                );
-                                const clampedWidth = right - left;
+                            ctx.globalAlpha = alpha;
+                            const markerColor =
+                                palette[themeVariable] ||
+                                palette[FALLBACK_CATEGORY.themeVariable] ||
+                                palette.colorAccent;
 
-                                if (clampedWidth > 0) {
-                                    ctx.fillRect(left, marker.laneY, clampedWidth, marker.laneHeight);
+                            ctx.fillStyle = markerColor;
+
+                            for (let j = 0; j < groupMarkers.length; j++) {
+                                const marker = groupMarkers[j];
+                                const centerY = marker.laneY + marker.laneHeight / 2;
+
+                                if (marker.isPoint) {
+                                    // Точечное событие: центрированный круг на середине дорожки
+                                    ctx.beginPath();
+                                    ctx.arc(marker.screenX, centerY, MARKER_POINT_RADIUS, 0, Math.PI * 2);
+                                    ctx.fill();
+                                } else {
+                                    // Интервальное событие: отсечение экранных границ полосы
+                                    const left = Math.max(marker.screenX, -MARKER_RENDER_BOUND_BUFFER_PX);
+                                    const right = Math.min(
+                                        marker.screenX + marker.widthPx,
+                                        widthPx + MARKER_RENDER_BOUND_BUFFER_PX
+                                    );
+                                    const clampedWidth = right - left;
+
+                                    if (clampedWidth > 0) {
+                                        ctx.fillRect(left, marker.laneY, clampedWidth, marker.laneHeight);
+                                    }
                                 }
                             }
                         }
                     }
+
+                    // Сброс альфа-канала после завершения отрисовки маркеров
+                    ctx.globalAlpha = 1.0;
                 }
 
-                // 6.2. Отрисовка фоновых подложек плашек переполнения
+                // 6.2. Отрисовка фоновых подложек плашек переполнения от левого края
                 if (hasOverflow) {
-                    ctx.fillStyle = palette['--color-category-other'] || '#64748b';
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle = palette.badgeNeutral || '#52525b';
                     for (let i = 0; i < layout.overflowMarkers.length; i++) {
                         const marker = layout.overflowMarkers[i];
                         const badgeWidth = marker.widthPx || OVERFLOW_BADGE_WIDTH_PX;
-                        const halfWidth = badgeWidth / 2;
                         ctx.fillRect(
-                            marker.screenX - halfWidth,
+                            marker.screenX,
                             marker.laneY,
                             badgeWidth,
                             marker.laneHeight
@@ -305,16 +350,23 @@ export function createTimelineRenderer(canvasElement) {
                     }
                 }
 
-                // 6.3. Отрисовка фоновых подложек круговых бейджей агрегатов
+                // 6.3. Отрисовка фоновых подложек круговых бейджей агрегатов с прозрачностью слоя
                 if (hasAggregate) {
                     ctx.fillStyle = palette.bgSecondary || '#1a1a1e';
                     for (let i = 0; i < layout.aggregateMarkers.length; i++) {
                         const marker = layout.aggregateMarkers[i];
+                        const alpha = currentRenderConfig?.alphaByThemeVariable?.[marker.themeVariable] ?? 1.0;
+                        if (alpha <= 0) {
+                            continue;
+                        }
+
+                        ctx.globalAlpha = alpha;
                         const centerY = marker.laneY + marker.laneHeight / 2;
                         ctx.beginPath();
                         ctx.arc(marker.screenX, centerY, AGGREGATE_BADGE_RADIUS_PX, 0, Math.PI * 2);
                         ctx.fill();
                     }
+                    ctx.globalAlpha = 1.0;
                 }
 
                 ctx.restore();
@@ -322,17 +374,24 @@ export function createTimelineRenderer(canvasElement) {
                 // --- ПРОХОД 2: Типографика бейджей и контуры выделения ---
                 ctx.save();
 
-                // 6.4. Обводка и нанесение счетчиков на бейджи агрегатов
+                // 6.4. Обводка и нанесение счетчиков на бейджи агрегатов с прозрачностью слоя
                 if (hasAggregate) {
-                    ctx.strokeStyle = palette.colorAccent;
                     ctx.lineWidth = 1.5;
-                    ctx.fillStyle = palette.textPrimary;
                     ctx.font = '9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
 
                     for (let i = 0; i < layout.aggregateMarkers.length; i++) {
                         const marker = layout.aggregateMarkers[i];
+                        const alpha = currentRenderConfig?.alphaByThemeVariable?.[marker.themeVariable] ?? 1.0;
+                        if (alpha <= 0) {
+                            continue;
+                        }
+
+                        ctx.globalAlpha = alpha;
+                        ctx.strokeStyle = palette.colorAccent;
+                        ctx.fillStyle = palette.textPrimary;
+
                         const centerY = marker.laneY + marker.laneHeight / 2;
 
                         ctx.beginPath();
@@ -345,10 +404,12 @@ export function createTimelineRenderer(canvasElement) {
                                 : String(marker.count);
                         ctx.fillText(badgeText, marker.screenX, centerY);
                     }
+                    ctx.globalAlpha = 1.0;
                 }
 
-                // 6.5. Нанесение текстовых счетчиков на плашки переполнения
+                // 6.5. Нанесение текстовых счетчиков на плашки переполнения с выравниванием по центру плашки
                 if (hasOverflow) {
+                    ctx.globalAlpha = 1.0;
                     ctx.fillStyle = palette.textPrimary;
                     ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
                     ctx.textAlign = 'center';
@@ -356,18 +417,21 @@ export function createTimelineRenderer(canvasElement) {
 
                     for (let i = 0; i < layout.overflowMarkers.length; i++) {
                         const marker = layout.overflowMarkers[i];
+                        const badgeWidth = marker.widthPx || OVERFLOW_BADGE_WIDTH_PX;
+                        const centerX = marker.screenX + badgeWidth / 2;
                         const centerY = marker.laneY + marker.laneHeight / 2;
-                        ctx.fillText('+' + marker.count, marker.screenX, centerY);
+                        ctx.fillText('+' + marker.count, centerX, centerY);
                     }
                 }
 
-                // 6.6. Отрисовка контура активного выделения
+                // 6.6. Отрисовка контура активного выделения (гарантированно полностью непрозрачна)
                 if (selectedEventId !== null && hasPlaced) {
                     const selectedMarker = layout.placedMarkers.find(
                         (m) => m.event && m.event.id === selectedEventId
                     );
 
                     if (selectedMarker) {
+                        ctx.globalAlpha = 1.0;
                         ctx.strokeStyle = palette.colorAccent;
                         ctx.lineWidth = SELECTION_HIGHLIGHT_WIDTH_PX;
 
@@ -499,6 +563,19 @@ export function createTimelineRenderer(canvasElement) {
         },
 
         /**
+         * Установка конфигурации отрисовки слоев (порядок и прозрачность).
+         *
+         * @param {Object|null} config Конфигурация рендеринга { drawOrder, alphaByThemeVariable }.
+         */
+        setLayerRenderConfig(config) {
+            if (config && Array.isArray(config.drawOrder)) {
+                currentRenderConfig = config;
+            } else {
+                currentRenderConfig = buildLayerRenderConfig(createDefaultLayerState());
+            }
+        },
+
+        /**
          * Принудительное обновление кэшированной цветовой палитры темы оформления
          * (вызывается при динамическом переключении тем оформления приложения).
          */
@@ -521,6 +598,7 @@ export function createTimelineRenderer(canvasElement) {
             ctx = null;
             pendingState = null;
             pendingLayout = null;
+            currentRenderConfig = buildLayerRenderConfig(createDefaultLayerState());
         },
     };
 }

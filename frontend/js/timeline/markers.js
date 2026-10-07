@@ -1,20 +1,26 @@
 /**
  * Модуль геометрической проекции и фильтрации видимости маркеров исторических событий.
  * Выполняет чистый расчет экранных координат, ширины полос интервальных событий,
- * определение вырожденных интервалов и маппинг CSS-переменных цветовых категорий темы.
+ * определение вырожденных интервалов и сопоставление категорий с переменными темы
+ * на базе единого реестра categories.js.
  *
  * АРХИТЕКТУРНЫЕ СОГЛАШЕНИЯ:
  * 1. Модуль является чистой математической функцией без побочных эффектов, состояния
  *    и зависимостей от DOM-дерева и контекста Canvas 2D.
- * 2. Вертикальное распределение (стекирование полос) и разрешение коллизий маркеров
- *    в данном модуле не реализуются и сознательно отнесены к шагу 3 дорожной карты.
- *    Все маркеры формируются для размещения на единой горизонтальной базовой полосе,
- *    а визуальные наложения перекрываются в естественном хронологическом порядке.
+ * 2. Вертикальное распределение и разрешение коллизий маркеров выполняются
+ *    в специализированном модуле layout.js; данный модуль формирует одномерные проекции.
  * 3. Правило вырожденного интервала: если длина интервального события на экране меньше
  *    MIN_EVENT_BAR_WIDTH_PX, событие маркируется как точечное (isPoint = true, widthPx = 0),
  *    что гарантирует его визуальную различимость на обзорных масштабах времени.
+ * 4. Источник истины категорий: переменные тем и валидация категорий делегируются
+ *    реестру categories.js, сохраняя обратную совместимость экспортируемых констант.
  */
 
+import {
+    CATEGORY_REGISTRY,
+    FALLBACK_CATEGORY,
+    getCategoryDescriptor,
+} from './categories.js';
 import { timestampToScreenX } from './scale.js';
 
 /**
@@ -37,19 +43,18 @@ export const MAX_RENDERED_MARKERS_CEILING = 500;
 
 /**
  * Имя CSS-переменной цвета по умолчанию для неизвестных или пользовательских категорий.
+ * Считывается непосредственно из дескриптора запасной категории реестра.
  */
-export const FALLBACK_CATEGORY_THEME_VARIABLE = '--color-category-other';
+export const FALLBACK_CATEGORY_THEME_VARIABLE = FALLBACK_CATEGORY.themeVariable;
 
 /**
  * Таблица соответствия регламентированных категорий событий переменным цветовой палитры темы.
+ * Формируется динамически на основе единого реестра категорий CATEGORY_REGISTRY.
  * @type {Readonly<Record<string, string>>}
  */
-export const CATEGORY_THEME_VARIABLES = Object.freeze({
-    culture: '--color-category-culture',
-    politics: '--color-category-politics',
-    economy: '--color-category-economy',
-    science: '--color-category-science',
-});
+export const CATEGORY_THEME_VARIABLES = Object.freeze(
+    Object.fromEntries(CATEGORY_REGISTRY.map((descriptor) => [descriptor.id, descriptor.themeVariable]))
+);
 
 /**
  * Проецирует временные границы события в экранную геометрию (координату X, ширину и тип маркера).
@@ -103,20 +108,13 @@ export function projectEventGeometry(
 
 /**
  * Определяет имя CSS-переменной палитры темы для заданной категории события.
- * Поддерживает нечувствительность к регистру и защиту от пользовательских значений СУБД.
+ * Делегирует извлечение дескриптора централизованному реестру категорий.
  *
- * @param {string|unknown} category Строковый идентификатор категории.
+ * @param {string|unknown} category Строковый идентификатор категории или произвольное значение.
  * @returns {string} Имя CSS-переменной темы (например, '--color-category-science').
  */
 export function getCategoryThemeVariable(category) {
-    if (typeof category === 'string') {
-        const normalizedCategory = category.trim().toLowerCase();
-        if (Object.prototype.hasOwnProperty.call(CATEGORY_THEME_VARIABLES, normalizedCategory)) {
-            return CATEGORY_THEME_VARIABLES[normalizedCategory];
-        }
-    }
-
-    return FALLBACK_CATEGORY_THEME_VARIABLE;
+    return getCategoryDescriptor(category).themeVariable;
 }
 
 /**
@@ -213,7 +211,7 @@ export function prepareEventMarkers(
                 minBarWidth
             );
 
-            // Разрешение переменной темы оформления по категории
+            // Разрешение переменной темы оформления по категории через реестр
             const themeVariable = getCategoryThemeVariable(event.category);
 
             preparedMarkers.push({

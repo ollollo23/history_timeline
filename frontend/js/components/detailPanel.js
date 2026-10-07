@@ -1,23 +1,30 @@
 /**
  * Модуль компонента боковой панели детализации исторического события (Detail Panel).
  * Управляет отображением метаданных события, описания, первоисточника,
- * списка прямых потомков для иерархической навигации и состояний сетевой загрузки.
+ * списка прямых потомков для иерархической навигации, цветовой индикации категорий
+ * и состояний сетевой загрузки.
  *
  * АРХИТЕКТУРНЫЕ ПРИНЦИПЫ И БЕЗОПАСНОСТЬ:
  * 1. Абсолютная защита от XSS: свойство innerHTML категорически не используется.
  *    Все узлы создаются через document.createElement, а пользовательские текстовые поля
- *    записываются исключительно через свойство textContent.
+ *    записываются исключительно через свойство textContent или document.createTextNode.
  * 2. Однократное монтирование и переиспользование: панель встраивается в DOM-дерево
  *    один раз при создании представления и обновляет содержимое через метод render.
- * 3. Единый источник форматирования дат: временные границы форматируются
+ * 3. Цветовое кодирование: цвет категории события передается через CSS-переменную
+ *    --badge-color, формируя цветную декоративную полосу бейджа и маркеры потомков.
+ * 4. Единый источник форматирования дат: временные границы форматируются
  *    централизованной функцией formatEventDateRange с учетом ранга детализации.
- * 4. Разделение жизненного цикла: визуальное скрытие hide() изолировано от запроса
+ * 5. Разделение жизненного цикла: визуальное скрытие hide() изолировано от запроса
  *    закрытия requestClose(), исключая зацикливание при реактивных обновлениях.
- * 5. Безопасное управление ресурсами: в методе destroy снимаются слушатели событий
- *    и удаляется корневой узел из родительского контейнера.
+ * 6. Безопасное управление ресурсами: в методе destroy снимаются слушатели событий,
+ *    очищаются свойства стилей и удаляется корневой узел из родительского контейнера.
  */
 
 import { formatEventDateRange } from '../timeline/format.js';
+import {
+    getCategoryDescriptor,
+    getCategoryLabel,
+} from '../timeline/categories.js';
 
 /**
  * Фабрика создания компонента боковой панели детализации события.
@@ -146,13 +153,14 @@ export function createDetailPanel(containerElement, onCloseOrOptions, onSelectCh
     }
 
     /**
-     * Визуальное скрытие боковой панели и сброс текстового содержимого полей.
+     * Визуальное скрытие боковой панели и сброс содержимого и динамических стилей полей.
      * Не инициирует внешних колбэков, исключая зацикливание при реактивных обновлениях.
      */
     function hide() {
         panelElement.classList.add('hidden');
         titleElement.textContent = '';
         datesElement.textContent = '';
+        categoryBadge.style.removeProperty('--badge-color');
         categoryBadge.textContent = '';
         rankBadge.textContent = '';
         descriptionElement.textContent = '';
@@ -227,8 +235,12 @@ export function createDetailPanel(containerElement, onCloseOrOptions, onSelectCh
         // Форматирование хронологического интервала дат с точностью по рангу события
         datesElement.textContent = formatEventDateRange(event.start_date, event.end_date, event.rank);
 
-        // Заполнение метаданных (категория и ранг)
-        categoryBadge.textContent = event.category ? String(event.category) : 'Общее';
+        // Цветовое кодирование и заполнение метаданных категории через реестр
+        const categoryDesc = getCategoryDescriptor(event.category);
+        categoryBadge.textContent = getCategoryLabel(event.category);
+        categoryBadge.style.setProperty('--badge-color', 'var(' + categoryDesc.themeVariable + ')');
+
+        // Заполнение ранга детализации
         rankBadge.textContent = event.rank ? String(event.rank) : '';
 
         // Заполнение описания
@@ -260,7 +272,7 @@ export function createDetailPanel(containerElement, onCloseOrOptions, onSelectCh
             childrenCountElement.style.display = 'none';
         }
 
-        // Обработка списка потомков
+        // Обработка списка потомков с цветовыми образцами категорий
         if (validChildren.length > 0) {
             childrenSection.style.display = 'block';
 
@@ -271,7 +283,17 @@ export function createDetailPanel(containerElement, onCloseOrOptions, onSelectCh
 
                 const childTitleElement = document.createElement('span');
                 childTitleElement.className = 'timeline-detail-child-title';
-                childTitleElement.textContent = child.title || 'Без названия';
+
+                // Цветовой образец категории дочернего события
+                const childDesc = getCategoryDescriptor(child.category);
+                const childSwatch = document.createElement('span');
+                childSwatch.className = 'timeline-detail-child-swatch';
+                childSwatch.setAttribute('aria-hidden', 'true');
+                childSwatch.style.setProperty('--badge-color', 'var(' + childDesc.themeVariable + ')');
+
+                const childTitleText = document.createTextNode(child.title || 'Без названия');
+                childTitleElement.appendChild(childSwatch);
+                childTitleElement.appendChild(childTitleText);
 
                 const childDatesElement = document.createElement('span');
                 childDatesElement.className = 'timeline-detail-child-dates';

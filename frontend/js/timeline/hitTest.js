@@ -12,6 +12,8 @@
  *    приоритет отдается маркеру с минимальной площадью (мелкий поверх крупного).
  * 4. Приоритет интерактивных слоев: проверка цели выполняется в строгом порядке:
  *    агрегаты потомков -> маркеры переполнения -> маркеры событий.
+ * 5. Соглашение координат: coordinate screenX для интервалов и маркеров переполнения
+ *    обозначает их левую границу.
  */
 
 import {
@@ -111,6 +113,7 @@ export function findMarkerAtPoint(layout, x, y, tolerance = HIT_TEST_TOLERANCE_P
 
 /**
  * Определение маркера переполнения (Overflow Badge) под заданной экранной точкой.
+ * Координата screenX задает левую границу прямоугольника плашки.
  *
  * @param {Object} layout Результат работы функции computeTimelineLayout.
  * @param {number} x Горизонтальная координата курсора относительно холста.
@@ -125,10 +128,10 @@ export function findOverflowAtPoint(layout, x, y, tolerance = HIT_TEST_TOLERANCE
 
     for (let i = 0; i < layout.overflowMarkers.length; i++) {
         const marker = layout.overflowMarkers[i];
-        const halfWidth = (marker.widthPx || OVERFLOW_BADGE_WIDTH_PX) / 2;
+        const badgeWidth = marker.widthPx || OVERFLOW_BADGE_WIDTH_PX;
 
-        const left = marker.screenX - halfWidth - tolerance;
-        const right = marker.screenX + halfWidth + tolerance;
+        const left = marker.screenX - tolerance;
+        const right = marker.screenX + badgeWidth + tolerance;
         const top = marker.laneY - tolerance;
         const bottom = marker.laneY + marker.laneHeight + tolerance;
 

@@ -2,24 +2,28 @@
  * Контроллер интерактивного взаимодействия с временной осью таймлайна.
  * Связывает чистую модель состояния камеры (viewport.js), графический конвейер (renderer.js),
  * хранилище событий (eventStore.js), хранилище выбора (selection.js), расчет раскладки (layout.js),
- * геометрический хит-тест (hitTest.js), фокусировку камеры (focus.js) и обработку пользовательского ввода.
+ * модель управления слоями (layers.js), геометрический хит-тест (hitTest.js),
+ * фокусировку камеры (focus.js) и обработку пользовательского ввода.
  *
  * АРХИТЕКТУРНЫЕ ПРИНЦИПЫ:
  * 1. Изоляция ответственности: контроллер не выполняет самостоятельных геометрических вычислений,
  *    делегируя трансформации чистым функциям panViewport, zoomViewport, resizeViewport.
- * 2. Централизованный расчет раскладки: структура дорожек вычисляется один раз при изменении
- *    камеры или данных и сохраняется в currentLayout для совместного использования рендерером и хит-тестом.
+ * 2. Централизованный расчет раскладки: структура дорожек вычисляется с учетом фильтрации видимых слоев
+ *    и карты приоритета layerPriority, сохраняясь в currentLayout для рендерера и хит-теста.
  * 3. Разделение клика и перетаскивания: замер смещения указателя с порогом 5 пикселей предотвращает
  *    случайное открытие боковой панели детализации при панорамировании холста.
  * 4. Двухконтурное уведомление: внешний подписчик onStateChange получает согласованный слепок
  *    из трех компонентов: состояние камеры, состояние хранилища событий и состояние выбора.
  * 5. Безопасное управление памятью: в методе destroy строго соблюдается регламентированный порядок
  *    утилизации хранилищ, очистки ссылок, остановки рендерера и снятия слушателей событий.
+ * 6. Декларативные переходы слоев: метод setLayerState управляется планом planLayerStateTransition,
+ *    выполняя сброс привязок дорожек только при смене порядка категорий.
  */
 
 import {
     HIT_TEST_TOLERANCE_PX,
     MIN_EVENT_BAR_WIDTH_PX,
+    NOW_MARKER_REFRESH_MAX_SPP,
     TIMELINE_CANVAS_HEIGHT_PX,
     ZOOM_STEP_PER_WHEEL_NOTCH,
 } from './constants.js';
@@ -29,7 +33,10 @@ import {
     resizeViewport,
     zoomViewport,
 } from './viewport.js';
-import { zoomIndexToSecondsPerPixel } from './scale.js';
+import {
+    timestampToScreenX,
+    zoomIndexToSecondsPerPixel,
+} from './scale.js';
 import { createTimelineRenderer } from './renderer.js';
 import { createEventStore } from './eventStore.js';
 import {
@@ -44,6 +51,14 @@ import { computeTimelineLayout } from './layout.js';
 import { resolveCursorTarget } from './hitTest.js';
 import { createSelectionStore } from './selection.js';
 import { computeFocusViewport } from './focus.js';
+import {
+    normalizeLayerState,
+    filterEventsByLayers,
+    buildLayerPriority,
+    buildLayerRenderConfig,
+    planLayerStateTransition,
+    getCategoryRequest,
+} from './layers.js';
 
 /**
  * Вычисление дискретного приращения логарифмического индекса масштаба по направлению прокрутки колеса мыши.
@@ -100,7 +115,7 @@ export function normalizeWheelDelta(event) {
  *   fetchFn?: Function,
  *   fetchEventByIdFn?: Function,
  *   fetchChildrenFn?: Function,
- *   categories?: string[],
+ *   layerState?: Object,
  *   storeOptions?: Object,
  *   selectionOptions?: Object,
  *   hitTolerance?: number
@@ -112,6 +127,9 @@ export function normalizeWheelDelta(event) {
  *   getSelectionStore: () => Object,
  *   getSelectionState: () => Object,
  *   getLayout: () => Object | null,
+ *   getLayerState: () => Object,
+ *   setLayerState: (next: Object) => void,
+ *   refreshNowMarker: () => void,
  *   selectEvent: (id: number) => Promise<void>,
  *   clearSelection: () => void,
  *   focusEvent: (event: Object) => void,
@@ -134,11 +152,15 @@ export function createTimelineController(
     const initialHeight = containerElement.clientHeight || TIMELINE_CANVAS_HEIGHT_PX;
     let state = getDefaultViewportState(initialWidth, initialHeight);
 
-    // 2. Инициализация изолированного рендерера Canvas 2D
-    const renderer = createTimelineRenderer(canvasElement);
+    // 2. Инициализация модели слоев категорий и карты приоритетов
+    let layerState = normalizeLayerState(options.layerState);
+    let layerPriority = buildLayerPriority(layerState);
 
-    // 3. Подготовка конфигурации и адаптеров сетевого хранилища событий
-    const categories = Array.isArray(options.categories) ? options.categories : [];
+    // 3. Инициализация изолированного рендерера Canvas 2D и передача конфигурации слоев
+    const renderer = createTimelineRenderer(canvasElement);
+    renderer.setLayerRenderConfig(buildLayerRenderConfig(layerState));
+
+    // 4. Подготовка сетевых функций и параметров хранилищ
     const fetchFn = options.fetchFn || fetchEventsInRange;
     const storeOptions = options.storeOptions || {};
 
@@ -174,27 +196,34 @@ export function createTimelineController(
 
     /**
      * Централизованный пересчет вертикальной раскладки дорожек.
-     * Проецирует маркеры событий и вычисляет координаты с сохранением закрепления дорожек.
+     * Фильтрует события по активным слоям и вычисляет координаты с учетом карты приоритетов слоев.
+     * Поддерживает сброс привязок дорожек (stickiness) при структурных перестановках порядка слоев.
+     *
+     * @param {{ resetLaneAssignments?: boolean }} [options={}] Опции пересчета компоновки.
      */
-    function updateCurrentLayout() {
+    function updateCurrentLayout({ resetLaneAssignments = false } = {}) {
         const spp = zoomIndexToSecondsPerPixel(state.zoomIndex);
-        const events =
+        const rawEvents =
             lastStoreState && Array.isArray(lastStoreState.events)
                 ? lastStoreState.events
                 : [];
+        const visibleEvents = filterEventsByLayers(rawEvents, layerState);
         const markers = prepareEventMarkers(
-            events,
+            visibleEvents,
             state.originTimestamp,
             spp,
             state.widthPx,
             { minBarWidth: MIN_EVENT_BAR_WIDTH_PX }
         );
-        const previousLaneAssignments = currentLayout?.laneAssignments || null;
+        const previousLaneAssignments = resetLaneAssignments
+            ? null
+            : (currentLayout?.laneAssignments || null);
+
         currentLayout = computeTimelineLayout(
             markers,
             state.widthPx,
             state.heightPx,
-            { previousLaneAssignments }
+            { previousLaneAssignments, layerPriority }
         );
     }
 
@@ -241,12 +270,17 @@ export function createTimelineController(
 
     /**
      * Вычисляет активный уровень лестницы сетки, определяет набор запрашиваемых рангов
-     * и передает задачу загрузки данных в хранилище.
+     * и фильтр категорий из модели слоев, после чего передает задачу загрузки данных в хранилище.
      */
     function requestEventsForCurrentState() {
+        const categoryRequest = getCategoryRequest(layerState);
+        if (!categoryRequest.shouldRequest) {
+            return;
+        }
+
         const activeLevel = getActiveLadderLevel(state);
         const activeRanks = getRanksForUnit(activeLevel.unit);
-        store.requestWindow(state, activeRanks, categories);
+        store.requestWindow(state, activeRanks, categoryRequest.categories);
     }
 
     // Первичный расчет раскладки, отрисовка координатной сетки и запрос событий
@@ -254,7 +288,7 @@ export function createTimelineController(
     renderer.requestRender(state, currentLayout);
     requestEventsForCurrentState();
 
-    // 4. Структуры данных для отслеживания мультитач-жестов
+    // 5. Структуры данных для отслеживания мультитач-жестов
     const activePointers = new Map();
     let initialPinchDistance = null;
     let initialPinchZoomIndex = null;
@@ -296,6 +330,76 @@ export function createTimelineController(
 
         if (event.id !== undefined && event.id !== null) {
             selectionStore.select(event.id);
+        }
+    }
+
+    /**
+     * Обновление состояния слоев категорий (видимость, порядок, прозрачность).
+     * Исполняет декларативный план planLayerStateTransition:
+     * - при изменении порядка категорий сбрасывает привязки дорожек (resetLaneAssignments: true),
+     *   гарантируя перенос приоритетного слоя ближе к базовой оси времени;
+     * - при изменении только видимости сохраняет привязки дорожек для стабильности отображения;
+     * - при изменении только непрозрачности обновляет стили рендерера без пересчета компоновки,
+     *   сетевых запросов и уведомлений подписчика onStateChange.
+     *
+     * @param {Object} next Новое состояние слоев.
+     */
+    function setLayerState(next) {
+        const normalized = normalizeLayerState(next);
+        const plan = planLayerStateTransition(layerState, normalized);
+
+        if (!plan.changed) {
+            return;
+        }
+
+        layerState = normalized;
+
+        if (plan.updateAppearance) {
+            renderer.setLayerRenderConfig(buildLayerRenderConfig(normalized));
+        }
+
+        if (plan.relayout) {
+            layerPriority = buildLayerPriority(normalized);
+            updateCurrentLayout({ resetLaneAssignments: plan.resetLaneAssignments });
+        }
+
+        renderer.requestRender(state, currentLayout);
+
+        if (plan.requestData) {
+            requestEventsForCurrentState();
+        }
+
+        if (plan.relayout || plan.requestData) {
+            if (typeof onStateChange === 'function') {
+                onStateChange(state, lastStoreState, lastSelectionState);
+            }
+        }
+    }
+
+    /**
+     * Получение текущего актуального состояния слоев категорий.
+     *
+     * @returns {Object} Замороженный объект состояния слоев.
+     */
+    function getLayerState() {
+        return layerState;
+    }
+
+    /**
+     * Оптимизированное обновление позиции маркера текущего времени («Сейчас»).
+     * Запрашивает перерисовку только на детальных масштабах и при попадании маркера в видимую область.
+     */
+    function refreshNowMarker() {
+        const spp = zoomIndexToSecondsPerPixel(state.zoomIndex);
+        if (spp > NOW_MARKER_REFRESH_MAX_SPP) {
+            return;
+        }
+
+        const nowTs = Math.floor(Date.now() / 1000);
+        const nowX = timestampToScreenX(nowTs, state.originTimestamp, spp);
+
+        if (nowX >= -20 && nowX <= state.widthPx + 20) {
+            renderer.requestRender(state, currentLayout);
         }
     }
 
@@ -635,6 +739,8 @@ export function createTimelineController(
         lastSelectionState = null;
         currentLayout = null;
         pointerDownPos = null;
+        layerState = null;
+        layerPriority = null;
 
         // 4. Уничтожение подсистемы рендеринга
         renderer.destroy();
@@ -692,6 +798,23 @@ export function createTimelineController(
          * @returns {Object|null}
          */
         getLayout: () => currentLayout,
+
+        /**
+         * Получение текущего состояния слоев категорий.
+         * @returns {Object}
+         */
+        getLayerState,
+
+        /**
+         * Установка нового состояния слоев категорий с оптимизированной перерисовкой.
+         * @param {Object} next
+         */
+        setLayerState,
+
+        /**
+         * Оптимизированное обновление положения линии текущего времени.
+         */
+        refreshNowMarker,
 
         /**
          * Программный выбор события по его идентификатору.

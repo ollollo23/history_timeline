@@ -1,8 +1,9 @@
 /**
  * Модуль представления домашней страницы (главный экран таймлайна).
  * Реализует контракт жизненного цикла SPA-представлений платформы History Timeline:
- * декларативную HTML-разметку, фазу монтирования (mount) с инициализацией контроллера Canvas
- * и боковой панели детализации, а также фазу демонтирования (unmount) с полной очисткой ресурсов.
+ * декларативную HTML-разметку, фазу монтирования (mount) с инициализацией контроллера Canvas,
+ * панели слоев категорий, часов реального времени и боковой панели детализации,
+ * а также фазу демонтирования (unmount) с полной очисткой системных ресурсов.
  */
 
 import { createTimelineController } from '../timeline/controller.js';
@@ -12,6 +13,16 @@ import {
 } from '../timeline/scale.js';
 import { formatContextInterval } from '../timeline/format.js';
 import { createDetailPanel } from '../components/detailPanel.js';
+import { createClock } from '../components/clock.js';
+import { createLayerPanel } from '../components/layerPanel.js';
+import {
+    loadLayerState,
+    saveLayerState,
+    filterEventsByLayers,
+    isCategoryFilterActive,
+    getCategoryRequest,
+    countVisibleLayers,
+} from '../timeline/layers.js';
 
 /**
  * Форматирование понятного текстового описания текущего масштаба времени на пиксель экрана.
@@ -53,6 +64,9 @@ export function renderHome() {
     // Локализованные переменные состояния экземпляра экрана для предотвращения утечек памяти
     let timelineController = null;
     let detailPanel = null;
+    let layerPanel = null;
+    let clock = null;
+    let layerState = null;
     let resetClickListener = null;
     let savedResetBtnElement = null;
     let statusRafId = null;
@@ -74,6 +88,9 @@ export function renderHome() {
             <!-- Индикатор проверки связи с бэкендом (динамически обновляется контроллером) -->
             <div id="api-status" class="api-status-badge">Инициализация соединения с API...</div>
 
+            <!-- Контейнер панели управления слоями и быстрыми фильтрами -->
+            <div id="timeline-layer-panel"></div>
+
             <!-- Рабочий контейнер интерактивного холста временной шкалы -->
             <div id="timeline-container" class="timeline-container" style="position: relative; width: 100%; height: 440px; overflow: hidden; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; margin-top: 1.5rem;">
                 <canvas id="timeline-canvas" style="display: block; width: 100%; height: 100%; cursor: grab; outline: none;"></canvas>
@@ -84,7 +101,9 @@ export function renderHome() {
                 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem;">
                     <div><span style="color: var(--text-secondary);">Видимый диапазон: </span><strong id="timeline-range-info" style="color: var(--text-primary); font-family: monospace;">—</strong></div>
                     <div><span style="color: var(--text-secondary);">Масштаб: </span><strong id="timeline-scale-info" style="color: var(--text-primary); font-family: monospace;">—</strong></div>
+                    <div><span style="color: var(--text-secondary);">Сейчас: </span><time id="timeline-now-info" class="timeline-now-info">—</time></div>
                     <div><span style="color: var(--text-secondary);">Событий: </span><strong id="timeline-events-count" style="color: var(--text-primary); font-family: monospace;">0</strong></div>
+                    <div id="timeline-directions-wrapper" hidden><span style="color: var(--text-secondary);">Направления: </span><strong id="timeline-directions-info" class="timeline-directions-info">—</strong></div>
                     <div><span style="color: var(--text-secondary);">Статус: </span><strong id="timeline-loading-status" style="color: var(--text-primary); font-family: monospace;">Ожидание</strong></div>
                     <div id="timeline-truncation-warning" style="display: none; color: #eab308; font-weight: 500;">Показаны не все события (приблизьте масштаб)</div>
                 </div>
@@ -95,7 +114,7 @@ export function renderHome() {
 
     /**
      * Фаза монтирования: вызывается маршрутизатором после вставки разметки в DOM.
-     * Инициализирует интерактивный контроллер таймлайна, панель деталей и обработчики событий.
+     * Инициализирует интерактивный контроллер таймлайна, панель деталей, панель слоев, часы и слушатели событий.
      *
      * @param {HTMLElement} [container] Корневой элемент монтирования представления.
      */
@@ -109,8 +128,12 @@ export function renderHome() {
         const scaleInfoElement = root.querySelector('#timeline-scale-info');
         const resetBtnElement = root.querySelector('#timeline-reset-btn');
         const eventsCountElement = root.querySelector('#timeline-events-count');
+        const directionsWrapperElement = root.querySelector('#timeline-directions-wrapper');
+        const directionsInfoElement = root.querySelector('#timeline-directions-info');
         const loadingStatusElement = root.querySelector('#timeline-loading-status');
         const truncationWarningElement = root.querySelector('#timeline-truncation-warning');
+        const layerPanelContainer = root.querySelector('#timeline-layer-panel');
+        const nowElement = root.querySelector('#timeline-now-info');
 
         // Прерывание инициализации при отсутствии ключевых элементов рабочей области
         if (!canvasElement || !containerElement) {
@@ -119,6 +142,9 @@ export function renderHome() {
 
         // Сохранение ссылки на кнопку сброса для безопасного снятия слушателя в unmount
         savedResetBtnElement = resetBtnElement;
+
+        // Загрузка сохраненного состояния слоев из хранилища
+        layerState = loadLayerState();
 
         // Инициализация компонента боковой панели детализации с передачей обработчиков
         detailPanel = createDetailPanel(containerElement, {
@@ -156,15 +182,36 @@ export function renderHome() {
                 scaleInfoElement.textContent = formatScaleInfo(spp);
             }
 
-            // 2. Обновление индикаторов сетевого хранилища
-            if (storeState) {
-                // а) Обновление числа загруженных событий
-                if (eventsCountElement) {
-                    const count = Array.isArray(storeState.events) ? storeState.events.length : 0;
-                    eventsCountElement.textContent = String(count);
+            // 2. Управление отображением индикатора направлений
+            if (directionsWrapperElement && directionsInfoElement && layerState) {
+                if (isCategoryFilterActive(layerState)) {
+                    const counts = countVisibleLayers(layerState);
+                    directionsInfoElement.textContent = counts.visible + ' из ' + counts.total;
+                    directionsWrapperElement.hidden = false;
+                } else {
+                    directionsWrapperElement.hidden = true;
                 }
+            }
 
-                // б) Обновление сетевого статуса с цветовой индикацией
+            // 3. Обновление числа видимых событий
+            if (storeState && eventsCountElement) {
+                const rawEvents = Array.isArray(storeState.events) ? storeState.events : [];
+                const visibleEvents = layerState ? filterEventsByLayers(rawEvents, layerState) : rawEvents;
+                eventsCountElement.textContent = String(visibleEvents.length);
+            }
+
+            // 4. Обработка сетевого статуса с учетом отключения всех категорий
+            const categoryReq = layerState ? getCategoryRequest(layerState) : null;
+            if (categoryReq && categoryReq.shouldRequest === false) {
+                if (loadingStatusElement) {
+                    loadingStatusElement.textContent = 'Все направления скрыты';
+                    loadingStatusElement.style.color = 'var(--text-secondary)';
+                }
+                if (truncationWarningElement) {
+                    truncationWarningElement.style.display = 'none';
+                }
+            } else if (storeState) {
+                // Обновление сетевого статуса с цветовой индикацией
                 if (loadingStatusElement) {
                     if (storeState.status === 'loading') {
                         loadingStatusElement.textContent = 'Загрузка...';
@@ -178,7 +225,7 @@ export function renderHome() {
                     }
                 }
 
-                // в) Управление видимостью предупреждения об усечении выборки
+                // Управление видимостью предупреждения об усечении выборки
                 if (truncationWarningElement) {
                     truncationWarningElement.style.display = storeState.isTruncated
                         ? 'inline-block'
@@ -186,7 +233,7 @@ export function renderHome() {
                 }
             }
 
-            // 3. Синхронизация состояния боковой панели детализации с защитой от повторного рендеринга
+            // 5. Синхронизация состояния боковой панели детализации с защитой от повторного рендеринга
             if (selectionState && detailPanel) {
                 if (selectionState !== lastAppliedSelectionState) {
                     lastAppliedSelectionState = selectionState;
@@ -242,12 +289,59 @@ export function renderHome() {
             });
         };
 
-        // Создание контроллера интерактивного взаимодействия с холстом
+        /**
+         * Обработчик реактивного изменения состояния слоев (фильтрация, порядок, прозрачность).
+         *
+         * @param {Object} next Новое состояние слоев.
+         * @param {{ commit?: boolean }} [meta] Флаг фиксации изменений в localStorage.
+         */
+        const handleLayerChange = (next, { commit = true } = {}) => {
+            layerState = next;
+
+            if (timelineController && typeof timelineController.setLayerState === 'function') {
+                timelineController.setLayerState(next);
+            }
+
+            if (layerPanel && typeof layerPanel.update === 'function') {
+                layerPanel.update(next);
+            }
+
+            if (commit) {
+                saveLayerState(next);
+            }
+
+            if (timelineController) {
+                updateStatus(
+                    timelineController.getState(),
+                    timelineController.getStoreState(),
+                    timelineController.getSelectionState()
+                );
+            }
+        };
+
+        // Инициализация интерактивной панели слоев
+        if (layerPanelContainer) {
+            layerPanel = createLayerPanel(layerPanelContainer, {
+                initialState: layerState,
+                onChange: handleLayerChange,
+            });
+        }
+
+        // Создание контроллера интерактивного взаимодействия с холстом с передачей состояния слоев
         timelineController = createTimelineController(
             canvasElement,
             containerElement,
-            updateStatus
+            updateStatus,
+            { layerState }
         );
+
+        // Инициализация и запуск компонента часов реального времени
+        if (nowElement) {
+            clock = createClock(nowElement, {
+                onTick: () => timelineController?.refreshNowMarker(),
+            });
+            clock.start();
+        }
 
         // Первичное заполнение индикаторов статуса текущим состоянием камеры, хранилища и выбора
         if (timelineController && typeof timelineController.getState === 'function') {
@@ -282,6 +376,16 @@ export function renderHome() {
      * Завершает все анимации, слушатели ввода и освобождает ссылки для сборщика мусора.
      */
     const unmount = () => {
+        // Остановка и очистка часов и панели слоев
+        if (clock) {
+            clock.destroy();
+            clock = null;
+        }
+        if (layerPanel) {
+            layerPanel.destroy();
+            layerPanel = null;
+        }
+
         // Отмена запланированного кадра обновления тулбара
         if (statusRafId !== null) {
             cancelAnimationFrame(statusRafId);
@@ -316,6 +420,9 @@ export function renderHome() {
             }
             timelineController = null;
         }
+
+        // Обнуление состояния слоев
+        layerState = null;
     };
 
     return { html, mount, unmount };

@@ -1,5 +1,5 @@
 /**
- * Модуль форматирования текстовых подписей делений временной шкалы, интервалов и дат событий.
+ * Модуль форматирования текстовых подписей делений временной шкалы, интервалов, дат событий и часов.
  * Реализует чистое форматирование дат на русском языке без обращения к объектам Date и Intl.
  *
  * СИСТЕМНЫЕ СОГЛАШЕНИЯ И АРХИТЕКТУРНЫЕ ОГРАНИЧЕНИЯ:
@@ -12,6 +12,7 @@
  *    суффиксы («тыс. лет до н. э.», «млн лет до н. э.») без паразитных дробных хвостов.
  * 5. Масштаб миллионов лет активируется строго при достижении одного миллиона лет (>= 1 000 000).
  * 6. Форматирование дат событий адаптируется под доменный ранг детализации (rank).
+ * 7. Форматирование часов использует смещение часового пояса в соглашении Date.prototype.getTimezoneOffset.
  */
 
 import { timestampToCivil } from './calendar.js';
@@ -332,4 +333,66 @@ export function formatEventDateRange(startTimestamp, endTimestamp, rank) {
     }
 
     return `${startStr} — ${endStr}`;
+}
+
+/**
+ * Форматирование смещения часового пояса в стандартную строку формата UTC.
+ * Принимает числовое значение смещения в минутах согласно спецификации Date.prototype.getTimezoneOffset()
+ * (разница между временем UTC и местным временем: UTC - Local).
+ * Отрицательное значение смещения соответствует часовым поясам восточнее Гринвича (UTC+),
+ * положительное значение смещения соответствует поясам западнее Гринвича (UTC-).
+ *
+ * @param {number} timezoneOffsetMinutes Смещение в минутах (например, -180 для UTC+03:00, 300 для UTC-05:00).
+ * @returns {string} Строковое представление смещения вида 'UTC+03:00', 'UTC-05:00', 'UTC+00:00'.
+ */
+export function formatUtcOffset(timezoneOffsetMinutes) {
+    const rawOffset =
+        typeof timezoneOffsetMinutes === 'number' && Number.isFinite(timezoneOffsetMinutes)
+            ? timezoneOffsetMinutes
+            : 0;
+
+    const sign = rawOffset <= 0 ? '+' : '-';
+    const totalMinutes = Math.abs(Math.round(rawOffset));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    return 'UTC' + sign + padZero(hours) + ':' + padZero(minutes);
+}
+
+/**
+ * Форматирование момента времени для часов таймлайна в строковое представление вида «д мес год, ЧЧ:ММ:СС».
+ * Сдвигает метку миллисекунд Unix на заданное смещение часового пояса и раскладывает
+ * дату через алгоритм timestampToCivil без использования методов объекта Date.
+ *
+ * @param {number} epochMs Временная метка в миллисекундах эпохи Unix.
+ * @param {number} [timezoneOffsetMinutes=0] Смещение часового пояса в минутах (Date.prototype.getTimezoneOffset).
+ * @returns {string} Человекочитаемая строка даты и времени или пустая строка при невалидных данных.
+ */
+export function formatClockDateTime(epochMs, timezoneOffsetMinutes = 0) {
+    if (typeof epochMs !== 'number' || !Number.isFinite(epochMs)) {
+        return '';
+    }
+
+    const offsetMin =
+        typeof timezoneOffsetMinutes === 'number' && Number.isFinite(timezoneOffsetMinutes)
+            ? timezoneOffsetMinutes
+            : 0;
+
+    const shiftedMs = epochMs - offsetMin * 60 * 1000;
+    const shiftedSeconds = Math.floor(shiftedMs / 1000);
+    const civil = timestampToCivil(shiftedSeconds);
+
+    return (
+        civil.day +
+        ' ' +
+        MONTH_NAMES_SHORT[civil.month - 1] +
+        ' ' +
+        formatAstronomicalYear(civil.year) +
+        ', ' +
+        padZero(civil.hour) +
+        ':' +
+        padZero(civil.minute) +
+        ':' +
+        padZero(civil.second)
+    );
 }

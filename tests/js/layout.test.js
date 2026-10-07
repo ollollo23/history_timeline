@@ -2,7 +2,8 @@
  * Модульные тесты математического ядра вертикальной компоновки временной шкалы (layout.js).
  * Проверяет расчет вместимости и динамической высоты дорожек, инвертированные координаты Y,
  * независимое размещение потомков, позиционирование бейджей скрытых потомков,
- * расширенные границы коллизий, стресс-компоновку переполнения и закрепление дорожек.
+ * расширенные границы коллизий, стресс-компоновку переполнения, закрепление дорожек,
+ * приоритет слоев категорий и регрессионный сброс привязок при изменении порядка слоев.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -16,6 +17,11 @@ import {
     computeTimelineLayout,
     EVENT_RANKS_ORDERED,
 } from '../../frontend/js/timeline/layout.js';
+import {
+    createDefaultLayerState,
+    moveLayer,
+    buildLayerPriority,
+} from '../../frontend/js/timeline/layers.js';
 import {
     LANE_MIN_HEIGHT_PX,
     LANE_MAX_HEIGHT_PX,
@@ -39,6 +45,7 @@ function createTestMarker(id, screenX, widthPx, options = {}) {
             id,
             title: options.title || `Событие ${id}`,
             rank: options.rank || 'year',
+            category: options.category || 'science',
             start_date: options.startDate ?? 1000,
             parent_id: options.parentId ?? null,
             collapsed_children_count: options.collapsedChildrenCount ?? 0,
@@ -46,7 +53,11 @@ function createTestMarker(id, screenX, widthPx, options = {}) {
         screenX,
         widthPx,
         isPoint: options.isPoint ?? (widthPx === 0),
-        themeVariable: options.themeVariable || '--color-category-science',
+        themeVariable:
+            options.themeVariable ||
+            (options.category
+                ? '--color-category-' + options.category
+                : '--color-category-science'),
     };
 }
 
@@ -315,6 +326,163 @@ describe('Модуль вертикальной компоновки layout.js',
             // Интервальный маркер: left = 100, right = 100 + 50 + 6 = 156
             expect(boundsBar.left).toBe(100);
             expect(boundsBar.right).toBe(156);
+        });
+    });
+
+    describe('Приоритет слоев в компоновке (layerPriority)', () => {
+        it('при конфликте в одном ранге ближе к оси встает маркер верхнего слоя', () => {
+            const layerPriority = new Map([
+                ['politics', 0],
+                ['culture', 1],
+            ]);
+
+            const mCulture = createTestMarker(1, 100, 100, {
+                rank: 'year',
+                category: 'culture',
+            });
+            const mPolitics = createTestMarker(2, 100, 100, {
+                rank: 'year',
+                category: 'politics',
+            });
+
+            const result = computeTimelineLayout([mCulture, mPolitics], 1000, 440, {
+                layerPriority,
+            });
+
+            const placedPolitics = result.placedMarkers.find((m) => m.event.id === 2);
+            const placedCulture = result.placedMarkers.find((m) => m.event.id === 1);
+
+            expect(placedPolitics.laneIndex).toBe(0);
+            expect(placedCulture.laneIndex).toBe(1);
+        });
+
+        it('при разных рангах ранг побеждает независимо от слоя', () => {
+            const layerPriority = new Map([
+                ['politics', 0],
+                ['culture', 1],
+            ]);
+
+            const mCentury = createTestMarker(1, 100, 100, {
+                rank: 'century',
+                category: 'culture',
+            });
+            const mDay = createTestMarker(2, 100, 100, {
+                rank: 'day',
+                category: 'politics',
+            });
+
+            const result = computeTimelineLayout([mDay, mCentury], 1000, 440, {
+                layerPriority,
+            });
+
+            const placedCentury = result.placedMarkers.find((m) => m.event.id === 1);
+            const placedDay = result.placedMarkers.find((m) => m.event.id === 2);
+
+            expect(placedCentury.laneIndex).toBe(0);
+            expect(placedDay.laneIndex).toBe(1);
+        });
+
+        it('неизвестная категория идет последней в своем ранге', () => {
+            const layerPriority = new Map([
+                ['politics', 0],
+                ['culture', 1],
+            ]);
+
+            const mCulture = createTestMarker(1, 100, 100, {
+                rank: 'year',
+                category: 'culture',
+            });
+            const mUnknown = createTestMarker(2, 100, 100, {
+                rank: 'year',
+                category: 'unknown_custom_category',
+            });
+
+            const result = computeTimelineLayout([mUnknown, mCulture], 1000, 440, {
+                layerPriority,
+            });
+
+            const placedCulture = result.placedMarkers.find((m) => m.event.id === 1);
+            const placedUnknown = result.placedMarkers.find((m) => m.event.id === 2);
+
+            expect(placedCulture.laneIndex).toBe(0);
+            expect(placedUnknown.laneIndex).toBe(1);
+        });
+
+        it('без layerPriority порядок определяется базовыми правилами', () => {
+            const m1 = createTestMarker(1, 100, 100, {
+                rank: 'year',
+                category: 'culture',
+            });
+            const m2 = createTestMarker(2, 100, 100, {
+                rank: 'year',
+                category: 'politics',
+            });
+
+            const result = computeTimelineLayout([m2, m1], 1000, 440);
+
+            const placedM1 = result.placedMarkers.find((m) => m.event.id === 1);
+            const placedM2 = result.placedMarkers.find((m) => m.event.id === 2);
+
+            expect(placedM1.laneIndex).toBe(0);
+            expect(placedM2.laneIndex).toBe(1);
+            expect(compareMarkersByPriority(m1, m2)).toBeLessThan(0);
+        });
+
+        it('агрегат несет themeVariable родительского маркера', () => {
+            const parent = createTestMarker(10, 100, 300, {
+                rank: 'century',
+                category: 'culture',
+                themeVariable: '--color-category-culture',
+                collapsedChildrenCount: 3,
+            });
+
+            const result = computeTimelineLayout([parent], 1000, 440);
+
+            expect(result.aggregateMarkers).toHaveLength(1);
+            expect(result.aggregateMarkers[0].themeVariable).toBe('--color-category-culture');
+        });
+
+        it('закрепление сохраняет раскладку после смены порядка, компоновка без закрепления переносит верхний слой к оси', () => {
+            const mCulture = createTestMarker(1, 100, 500, {
+                rank: 'year',
+                category: 'culture',
+                startDate: 100,
+            });
+            const mPolitics = createTestMarker(2, 200, 500, {
+                rank: 'year',
+                category: 'politics',
+                startDate: 200,
+            });
+
+            // Этап 1. Компоновка с приоритетом слоев по умолчанию (культура 0, политика 1)
+            const defaultState = createDefaultLayerState();
+            const defaultPriority = buildLayerPriority(defaultState);
+            const res1 = computeTimelineLayout([mCulture, mPolitics], 1200, 440, {
+                layerPriority: defaultPriority,
+            });
+
+            expect(res1.placedMarkers.find((m) => m.event.id === 1).laneIndex).toBe(0);
+            expect(res1.placedMarkers.find((m) => m.event.id === 2).laneIndex).toBe(1);
+
+            // Этап 2. Смена порядка слоев с сохранением закрепления (политика 0, культура 1)
+            const nextState = moveLayer(defaultState, 'politics', -1);
+            const nextPriority = buildLayerPriority(nextState);
+
+            const resWithStickiness = computeTimelineLayout([mCulture, mPolitics], 1200, 440, {
+                layerPriority: nextPriority,
+                previousLaneAssignments: res1.laneAssignments,
+            });
+
+            expect(resWithStickiness.placedMarkers.find((m) => m.event.id === 2).laneIndex).toBe(1);
+            expect(resWithStickiness.placedMarkers.find((m) => m.event.id === 1).laneIndex).toBe(0);
+
+            // Этап 3. Та же компоновка без закрепления (сброс привязок дорожек)
+            const resWithoutStickiness = computeTimelineLayout([mCulture, mPolitics], 1200, 440, {
+                layerPriority: nextPriority,
+            });
+
+            expect(resWithoutStickiness.placedMarkers.find((m) => m.event.id === 2).laneIndex).toBe(0);
+            expect(resWithoutStickiness.placedMarkers.find((m) => m.event.id === 1).laneIndex).toBe(1);
         });
     });
 });

@@ -9,7 +9,7 @@ import pytest
 from fastapi import status
 from httpx import AsyncClient
 
-from app.core.enums import EventRank
+from app.core.enums import EventCategory, EventRank
 
 
 @pytest.mark.unit
@@ -317,3 +317,55 @@ async def test_layout_rank_enum_synchronization(
         assert pos != -1, f"Ранг '{rank_value}' не найден в коде layout.js"
         assert pos > last_index, f"Ранг '{rank_value}' нарушает порядок иерархии в layout.js"
         last_index = pos
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/static/js/timeline/categories.js",
+        "/static/js/timeline/layers.js",
+        "/static/js/components/clock.js",
+        "/static/js/components/layerPanel.js",
+    ],
+)
+async def test_serve_step_4a_layer_and_clock_modules(
+    async_client: AsyncClient,
+    path: str,
+) -> None:
+    """
+    Параметризованная проверка сетевой отдачи четырех модулей шага 4а (слои и часы).
+    Контролирует доступность реестра категорий, модели слоев, компонента часов
+    и панели управления слоями со статусом 200 OK и JavaScript MIME-типом.
+    """
+    response = await async_client.get(path)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "javascript" in response.headers["content-type"].lower()
+
+
+@pytest.mark.unit
+async def test_category_registry_enum_synchronization(
+    async_client: AsyncClient,
+) -> None:
+    """
+    Проверка кросс-контурной синхронизации реестра категорий categories.js
+    с серверным перечислением EventCategory.
+    Гарантирует идентичность состава категорий и сохранение монотонного порядка их объявления.
+    """
+    response = await async_client.get("/static/js/timeline/categories.js")
+    assert response.status_code == status.HTTP_200_OK
+
+    expected_categories = [cat.value for cat in EventCategory]
+    assert len(expected_categories) == 4
+
+    last_pos = -1
+    for cat_val in expected_categories:
+        pos = response.text.find(f"'{cat_val}'")
+        if pos == -1:
+            pos = response.text.find(f'"{cat_val}"')
+        assert pos != -1, f"Категория '{cat_val}' не найдена в коде categories.js"
+        assert pos > last_pos, (
+            f"Категория '{cat_val}' нарушает порядок перечисления в categories.js"
+        )
+        last_pos = pos
