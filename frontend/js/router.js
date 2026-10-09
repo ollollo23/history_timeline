@@ -1,3 +1,11 @@
+/**
+ * Модуль клиентской маршрутизации Single Page Application (SPA).
+ * Отвечает за сопоставление путей URL с функциями представлений,
+ * управление жизненным циклом компонентов (mount / unmount),
+ * обновление активных ссылок меню и безопасное отображение аварийного экрана
+ * без использования строковых инлайн-стилей согласно требованиям CSP.
+ */
+
 import { renderHome } from './views/home.js';
 import { renderCreateEvent } from './views/create_event.js';
 import { renderAdmin } from './views/admin.js';
@@ -15,7 +23,7 @@ const routes = {
 
 /**
  * Ссылка на функцию размонтирования (очистки ресурсов) текущего активного экрана.
- * Позволяет корректно снимать глобальные слушатели, отключать наблюдатели и останавливать анимации при навигации.
+ * Позволяет корректно снимать глобальные слушатели, отключать наблюдатели и останавливать таймеры при навигации.
  * @type {Function|null}
  */
 let currentUnmount = null;
@@ -119,19 +127,19 @@ export async function router() {
         // Поиск корневого контейнера для вывода визуального сообщения об ошибке
         const appRoot = document.getElementById('app-root');
         if (appRoot) {
-            // Монтирование статического HTML-каркаса карточки ошибки без небезопасной интерполяции
+            // Монтирование статического HTML-каркаса карточки ошибки с использованием семантических CSS-классов
             appRoot.innerHTML = `
-                <section class="view-card" style="border-color: #ef4444;">
-                    <h1 style="color: #ef4444;">Ошибка отображения страницы</h1>
+                <section class="view-card router-error-card">
+                    <h1 class="router-error-title">Ошибка отображения страницы</h1>
                     <p>Произошел сбой при монтировании представления интерфейса.</p>
-                    <div id="router-error-details" style="margin-top: 1rem; padding: 1rem; background: var(--bg-accent); border-radius: 6px; font-family: monospace; font-size: 0.9rem; color: #f87171; word-break: break-word;"></div>
-                    <div style="margin-top: 1.5rem;">
-                        <a href="/" data-link class="nav-link" style="color: var(--color-accent); text-decoration: underline;">Вернуться на главную страницу</a>
+                    <div id="router-error-details" class="router-error-details"></div>
+                    <div class="router-error-link">
+                        <a href="/" data-link class="nav-link">Вернуться на главную страницу</a>
                     </div>
                 </section>
             `;
 
-            // Безопасная запись текста ошибки через textContent для экранирования HTML/XSS
+            // Безопасная запись текста ошибки через textContent для исключения HTML-инъекций
             const errorDetails = document.getElementById('router-error-details');
             if (errorDetails) {
                 errorDetails.textContent = error.message || 'Неизвестная ошибка';
