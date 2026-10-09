@@ -16,7 +16,11 @@ from pydantic import (
     model_validator,
 )
 
-from app.core.constants import TIMELINE_MAX_TIMESTAMP, TIMELINE_MIN_TIMESTAMP
+from app.core.constants import (
+    EVENT_DESCRIPTION_MAX_LENGTH,
+    TIMELINE_MAX_TIMESTAMP,
+    TIMELINE_MIN_TIMESTAMP,
+)
 from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
 from app.schemas.media import MediaPayload
 
@@ -36,9 +40,10 @@ class EventCreate(BaseModel):
         description="Заголовок события",
     )
 
-    # Подробное историческое описание (опционально)
+    # Подробное историческое описание (опционально, ограничено системным лимитом)
     description: str | None = Field(
         default=None,
+        max_length=EVENT_DESCRIPTION_MAX_LENGTH,
         description="Развернутое описание исторического контекста",
     )
 
@@ -146,9 +151,10 @@ class EventUpdate(BaseModel):
         description="Заголовок события",
     )
 
-    # Опциональное обновление описания
+    # Опциональное обновление описания (ограничено системным лимитом длины)
     description: str | None = Field(
         default=None,
+        max_length=EVENT_DESCRIPTION_MAX_LENGTH,
         description="Развернутое описание",
     )
 
@@ -216,7 +222,7 @@ class EventUpdate(BaseModel):
             if field_name in self.NON_NULLABLE_UPDATE_FIELDS and getattr(self, field_name) is None:
                 raise ValueError(f"Поле '{field_name}' не может быть пустым (null).")
 
-        # Проверка границ даты начала при ее передаче (объединенное условие SIM102)
+        # Проверка границ даты начала при ее передаче
         if (
             "start_date" in self.model_fields_set
             and self.start_date is not None
@@ -227,7 +233,7 @@ class EventUpdate(BaseModel):
                 f"[{TIMELINE_MIN_TIMESTAMP}, {TIMELINE_MAX_TIMESTAMP}]."
             )
 
-        # Проверка границ даты окончания при ее передаче (объединенное условие SIM102)
+        # Проверка границ даты окончания при ее передаче
         if (
             "end_date" in self.model_fields_set
             and self.end_date is not None
@@ -238,7 +244,7 @@ class EventUpdate(BaseModel):
                 f"[{TIMELINE_MIN_TIMESTAMP}, {TIMELINE_MAX_TIMESTAMP}]."
             )
 
-        # Проверка согласованности интервала при обновлении обоих полей (объединенное условие SIM102)
+        # Проверка согласованности интервала при обновлении обоих полей
         if (
             "start_date" in self.model_fields_set
             and "end_date" in self.model_fields_set
@@ -255,6 +261,7 @@ class EventResponse(BaseModel):
     """
     Схема ответа API с полными атрибутами исторического события.
     Исключает служебную колонку end_date_effective и поддерживает маппинг из ORM.
+    Поле description намеренно не имеет ограничения max_length для обратной совместимости.
     """
 
     # Уникальный суррогатный идентификатор события в базе данных
@@ -269,7 +276,7 @@ class EventResponse(BaseModel):
         description="Заголовок события",
     )
 
-    # Полный исторический контекст (null при отсутствии)
+    # Полный исторический контекст (null при отсутствии, без ограничения max_length)
     description: str | None = Field(
         ...,
         description="Описание события",

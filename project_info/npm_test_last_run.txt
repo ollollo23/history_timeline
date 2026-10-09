@@ -3,28 +3,55 @@ npm notice run vitest run
 
  RUN  v3.2.7 C:/history_timeline
 
- ✓ tests/js/api.test.js (8 tests) 36ms
- ✓ tests/js/hitTest.test.js (8 tests) 6ms
- ✓ tests/js/rankMapping.test.js (22 tests) 8ms
- ✓ tests/js/calendar.test.js (24 tests) 11ms
- ✓ tests/js/clock.test.js (6 tests) 13ms
- ✓ tests/js/categories.test.js (13 tests) 13ms
- ✓ tests/js/layout.test.js (25 tests) 12ms
- ✓ tests/js/markers.test.js (21 tests) 12ms
- ✓ tests/js/viewport.test.js (34 tests) 14ms
- ✓ tests/js/format.test.js (34 tests) 34ms
- ✓ tests/js/layers.test.js (43 tests) 18ms
- ✓ tests/js/focus.test.js (16 tests) 9ms
- ✓ tests/js/ticks.test.js (14 tests) 22ms
- ✓ tests/js/eventStore.test.js (15 tests) 27ms
- ✓ tests/js/selection.test.js (12 tests) 142ms
- ✓ tests/js/loadWindow.test.js (25 tests) 4ms
- ✓ tests/js/scale.test.js (14 tests) 4ms
- ✓ tests/js/controller.test.js (5 tests) 3ms
- ✓ tests/js/layerPanel.dom.test.js (7 tests) 35ms
+ ✓ tests/js/api.test.js (8 tests) 47ms
+ ✓ tests/js/clock.test.js (6 tests) 27ms
+ ✓ tests/js/viewport.test.js (34 tests) 32ms
+ ✓ tests/js/ticks.test.js (14 tests) 49ms
+ ✓ tests/js/layout.test.js (25 tests) 39ms
+ ✓ tests/js/format.test.js (34 tests) 76ms
+ ✓ tests/js/layers.test.js (43 tests) 44ms
+ ✓ tests/js/eventStore.test.js (15 tests) 72ms
+ ✓ tests/js/selection.test.js (12 tests) 158ms
+ ✓ tests/js/categories.test.js (13 tests) 25ms
+ ✓ tests/js/mediaProviders.test.js (35 tests) 30ms
+ ✓ tests/js/markdownParser.test.js (37 tests) 61ms
+ ✓ tests/js/markers.test.js (21 tests) 21ms
+ ✓ tests/js/loadWindow.test.js (25 tests) 15ms
+ ✓ tests/js/focus.test.js (16 tests) 23ms
+ ✓ tests/js/calendar.test.js (24 tests) 15ms
+ ✓ tests/js/linkPolicy.test.js (77 tests) 29ms
+ ✓ tests/js/editorActions.test.js (36 tests) 22ms
+ ✓ tests/js/mediaEmbed.dom.test.js (10 tests) 63ms
+ ✓ tests/js/hitTest.test.js (8 tests) 14ms
+ ✓ tests/js/layerPanel.dom.test.js (7 tests) 134ms
+ ✓ tests/js/scale.test.js (14 tests) 14ms
+ ✓ tests/js/markdownEditor.dom.test.js (11 tests) 154ms
+stderr | tests/js/detailPanel.dom.test.js > Компонент панели деталей (detailPanel.js) > Сброс состояния и защита от утечек плееров > гарантированно очищает активные фреймы при переключении события и при hide
+Error: Failed to execute 'startTask()' on 'AsyncTaskManager': The asynchronous task manager has been destroyed. This error can be thrown if scripts continue to run while a browser frame is closed.
+    at AsyncTaskManager.startTask (file:///C:/history_timeline/node_modules/happy-dom/src/async-task-manager/AsyncTaskManager.ts:168:10)
+    at file:///C:/history_timeline/node_modules/happy-dom/src/fetch/Fetch.ts:544:71
+    at new Promise (<anonymous>)
+    at Fetch.sendRequest (file:///C:/history_timeline/node_modules/happy-dom/src/fetch/Fetch.ts:543:10)
+    at Fetch.send (file:///C:/history_timeline/node_modules/happy-dom/src/fetch/Fetch.ts:257:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at BrowserFrameNavigator.navigate (file:///C:/history_timeline/node_modules/happy-dom/src/browser/utilities/BrowserFrameNavigator.ts:256:15)
+Error: Failed to execute 'startTask()' on 'AsyncTaskManager': The asynchronous task manager has been destroyed. This error can be thrown if scripts continue to run while a browser frame is closed.
+    at AsyncTaskManager.startTask (file:///C:/history_timeline/node_modules/happy-dom/src/async-task-manager/AsyncTaskManager.ts:168:10)
+    at file:///C:/history_timeline/node_modules/happy-dom/src/fetch/Fetch.ts:544:71
+    at new Promise (<anonymous>)
+    at Fetch.sendRequest (file:///C:/history_timeline/node_modules/happy-dom/src/fetch/Fetch.ts:543:10)
+    at Fetch.send (file:///C:/history_timeline/node_modules/happy-dom/src/fetch/Fetch.ts:257:21)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at BrowserFrameNavigator.navigate (file:///C:/history_timeline/node_modules/happy-dom/src/browser/utilities/BrowserFrameNavigator.ts:256:15)
 
- Test Files  19 passed (19)
-      Tests  346 passed (346)
-   Start at  22:42:41
-   Duration  1.25s (transform 622ms, setup 0ms, collect 2.23s, tests 424ms, environment 317ms, prepare 2.68s)
+ ✓ tests/js/detailPanel.dom.test.js (7 tests) 172ms
+ ✓ tests/js/rankMapping.test.js (22 tests) 21ms
+ ✓ tests/js/markdownRenderer.test.js (24 tests) 238ms
+ ✓ tests/js/createEvent.dom.test.js (13 tests) 379ms
+ ✓ tests/js/controller.test.js (5 tests) 6ms
+
+ Test Files  28 passed (28)
+      Tests  596 passed (596)
+   Start at  07:46:28
+   Duration  3.24s (transform 2.22s, setup 0ms, collect 7.15s, tests 1.98s, environment 9.02s, prepare 10.23s)
 

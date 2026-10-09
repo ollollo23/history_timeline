@@ -1,8 +1,8 @@
 """
 Модульные тесты схем валидации и сериализации Pydantic v2.
 Проверяет контракты EventCreate, EventUpdate, EventResponse,
-EventRangeResponse, EventChildrenPage, MediaItem, MediaPayload
-и HealthResponse без обращения к базе данных.
+EventRangeResponse, EventChildrenPage, MediaItem, MediaPayload,
+HealthResponse, а также параметры конфигурации Settings без обращения к базе данных.
 """
 
 from datetime import datetime
@@ -10,7 +10,12 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from app.core.constants import TIMELINE_MAX_TIMESTAMP, TIMELINE_MIN_TIMESTAMP
+from app.core.config.config import settings
+from app.core.constants import (
+    EVENT_DESCRIPTION_MAX_LENGTH,
+    TIMELINE_MAX_TIMESTAMP,
+    TIMELINE_MIN_TIMESTAMP,
+)
 from app.core.enums import CalendarSystem, EventCategory, EventRank, EventStatus
 from app.models.event import Event
 from app.schemas.event import (
@@ -143,6 +148,38 @@ def test_event_create_end_date_out_of_bounds(invalid_end_date: int) -> None:
     assert "Дата окончания события выходит за допустимые границы платформы" in str(exc_info.value)
 
 
+@pytest.mark.unit
+def test_event_create_description_boundary() -> None:
+    """
+    Проверка граничных условий максимальной длины описания в схеме EventCreate.
+    Строка ровно EVENT_DESCRIPTION_MAX_LENGTH валидируется успешно,
+    превышение на 1 символ возбуждает ValidationError, None и пустая строка допустимы.
+    """
+    base_payload = {
+        "title": "Событие с описанием",
+        "start_date": 1000,
+        "category": EventCategory.CULTURE,
+    }
+
+    # 1. Граничная допустимая длина ровно EVENT_DESCRIPTION_MAX_LENGTH
+    exact_description = "x" * EVENT_DESCRIPTION_MAX_LENGTH
+    event_exact = EventCreate(**base_payload, description=exact_description)
+    assert event_exact.description == exact_description
+
+    # 2. Превышение лимита на 1 символ вызывает ValidationError
+    oversized_description = "x" * (EVENT_DESCRIPTION_MAX_LENGTH + 1)
+    with pytest.raises(ValidationError) as exc_info:
+        EventCreate(**base_payload, description=oversized_description)
+    assert "description" in str(exc_info.value)
+
+    # 3. Допустимость значений None и пустой строки
+    event_none = EventCreate(**base_payload, description=None)
+    assert event_none.description is None
+
+    event_empty = EventCreate(**base_payload, description="")
+    assert event_empty.description == ""
+
+
 # --- Тестирование схемы обновления события EventUpdate ---
 
 
@@ -183,7 +220,13 @@ def test_event_update_non_nullable_fields_composition() -> None:
     Гарантирует присутствие ровно пяти обязательных непустых полей
     и подтверждает отсутствие атрибута status в перечне.
     """
-    expected_fields = {"title", "start_date", "category", "rank", "calendar_system"}
+    expected_fields = {
+        "title",
+        "start_date",
+        "category",
+        "rank",
+        "calendar_system",
+    }
     assert EventUpdate.NON_NULLABLE_UPDATE_FIELDS == expected_fields
 
 
@@ -269,6 +312,76 @@ def test_event_update_end_date_out_of_bounds(invalid_end_date: int) -> None:
     assert "Дата окончания события выходит за допустимые границы платформы" in str(exc_info.value)
 
 
+@pytest.mark.unit
+def test_event_update_description_boundary() -> None:
+    """
+    Проверка граничных условий максимальной длины описания в схеме EventUpdate.
+    Строка ровно EVENT_DESCRIPTION_MAX_LENGTH валидируется успешно,
+    превышение на 1 символ возбуждает ValidationError, None и пустая строка допустимы.
+    """
+    # 1. Граничная допустимая длина ровно EVENT_DESCRIPTION_MAX_LENGTH
+    exact_description = "y" * EVENT_DESCRIPTION_MAX_LENGTH
+    update_exact = EventUpdate(description=exact_description)
+    assert update_exact.description == exact_description
+
+    # 2. Превышение лимита на 1 символ вызывает ValidationError
+    oversized_description = "y" * (EVENT_DESCRIPTION_MAX_LENGTH + 1)
+    with pytest.raises(ValidationError) as exc_info:
+        EventUpdate(description=oversized_description)
+    assert "description" in str(exc_info.value)
+
+    # 3. Допустимость значений None и пустой строки
+    update_none = EventUpdate(description=None)
+    assert update_none.description is None
+
+    update_empty = EventUpdate(description="")
+    assert update_empty.description == ""
+
+
+# --- Тестирование устойчивости EventResponse и параметров Settings ---
+
+
+@pytest.mark.unit
+def test_event_response_tolerates_oversized_description() -> None:
+    """
+    Проверка устойчивости схемы EventResponse к десериализации описания,
+    превышающего лимит EVENT_DESCRIPTION_MAX_LENGTH. Гарантирует обратную
+    совместимость с ранее сохраненными в БД записями.
+    """
+    now = datetime.now()
+    oversized_description = "A" * 25000
+    payload = {
+        "id": 1,
+        "title": "Событие с длинным описанием",
+        "description": oversized_description,
+        "start_date": 1000,
+        "end_date": None,
+        "category": EventCategory.CULTURE.value,
+        "rank": EventRank.YEAR,
+        "parent_id": None,
+        "source": None,
+        "calendar_system": CalendarSystem.GREGORIAN_PROLEPTIC,
+        "media_payload": None,
+        "status": EventStatus.APPROVED,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    response = EventResponse.model_validate(payload)
+    assert response.description == oversized_description
+
+
+@pytest.mark.unit
+def test_settings_description_limit_and_embed_hosts() -> None:
+    """
+    Проверка корректности параметров лимита описания и списка хостов в синглтоне Settings.
+    """
+    assert settings.event_description_max_length == 20000
+    assert isinstance(settings.embed_allowed_hosts, list)
+    for host in ("youtube.com", "rutube.ru", "vk.com", "music.yandex.ru"):
+        assert host in settings.embed_allowed_hosts
+
+
 # --- Тестирование схем медиа-данных и мониторинга ---
 
 
@@ -314,7 +427,7 @@ def test_media_payload_sequence_protocol() -> None:
     Проверка поддержки методов протокола последовательности (__len__, __getitem__, __iter__)
     корневой моделью MediaPayload для прозрачной работы с коллекцией медиа-ресурсов.
     """
-    # Инициализация трех валидных медиа-элементов различных типов
+    # Инициализация трех валидных медиа-элементов различных типов с доверенными адресами
     item_image = MediaItem(
         media_type="image",
         url="https://example.com/image.jpg",
@@ -322,7 +435,7 @@ def test_media_payload_sequence_protocol() -> None:
     )
     item_video = MediaItem(
         media_type="video",
-        url="https://example.com/video.mp4",
+        url="https://youtu.be/dQw4w9WgXcQ",
         title="Видео",
     )
     item_link = MediaItem(
@@ -350,6 +463,409 @@ def test_media_payload_sequence_protocol() -> None:
     # 3. Проверка работы метода __iter__ при прямой итерации через списковое включение
     extracted_types = [item.media_type for item in payload]
     assert extracted_types == ["image", "video", "link"]
+
+
+@pytest.mark.unit
+def test_media_item_youtube_embed_generation() -> None:
+    """
+    Проверка генерации канонического embed-URL для YouTube.
+    Проверяет сценарий с явным провайдером и автоматическое определение провайдера.
+    """
+    # 1. Создание с явно указанным провайдером youtube
+    item_short = MediaItem(
+        media_type="video",
+        url="https://youtu.be/dQw4w9WgXcQ",
+        provider="youtube",
+    )
+    assert item_short.provider == "youtube"
+    assert item_short.embed_url == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+
+    # 2. Создание без явного указания провайдера с автоматическим определением
+    item_watch = MediaItem(
+        media_type="video",
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    assert item_watch.provider == "youtube"
+    assert item_watch.embed_url == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+
+
+@pytest.mark.unit
+def test_media_item_rutube_and_vk_video() -> None:
+    """
+    Проверка формирования канонических адресов встраивания для Rutube и VK Video.
+    """
+    # 1. Видеохостинг Rutube
+    item_rutube = MediaItem(
+        media_type="video",
+        url="https://rutube.ru/video/a1b2c3d4e5f60718293a4b5c6d7e8f90/",
+    )
+    assert item_rutube.provider == "rutube"
+    assert item_rutube.embed_url == "https://rutube.ru/play/embed/a1b2c3d4e5f60718293a4b5c6d7e8f90"
+
+    # 2. Платформа VK Video со структурой oid, id и ключом hash
+    item_vk = MediaItem(
+        media_type="video",
+        url="https://vkvideo.ru/video-22822305_456239018?hash=abcdef1234",
+    )
+    assert item_vk.provider == "vk"
+    assert (
+        item_vk.embed_url
+        == "https://vk.com/video_ext.php?oid=-22822305&id=456239018&hash=abcdef1234"
+    )
+
+
+@pytest.mark.unit
+def test_media_item_yandex_music_and_direct_audio() -> None:
+    """
+    Проверка классификации аудио-ресурсов: виджет Яндекс.Музыки и прямой аудиофайл.
+    """
+    # 1. Трек платформы Яндекс.Музыка
+    item_yandex = MediaItem(
+        media_type="audio",
+        url="https://music.yandex.ru/album/123/track/456",
+    )
+    assert item_yandex.provider == "yandex"
+    assert item_yandex.embed_url == "https://music.yandex.ru/iframe/#track/456/123"
+
+    # 2. Прямой защищенный аудиофайл через https
+    item_direct = MediaItem(
+        media_type="audio",
+        url="https://cdn.history.org/lecture.mp3",
+        provider="direct",
+    )
+    assert item_direct.provider == "direct"
+    assert item_direct.embed_url is None
+
+
+@pytest.mark.unit
+def test_media_item_provider_mismatch_raises_validation_error() -> None:
+    """
+    Проверка блокировки подмены провайдера: несовпадение заявленного provider
+    с фактически обнаруженным хостом URL обязано вызывать ValidationError.
+    """
+    with pytest.raises(ValidationError) as exc_info_1:
+        MediaItem(
+            media_type="video",
+            url="https://youtu.be/dQw4w9WgXcQ",
+            provider="vk",
+        )
+    assert "не соответствует" in str(exc_info_1.value)
+
+    with pytest.raises(ValidationError) as exc_info_2:
+        MediaItem(
+            media_type="video",
+            url="https://rutube.ru/video/a1b2c3d4e5f60718293a4b5c6d7e8f90/",
+            provider="youtube",
+        )
+    assert "не соответствует" in str(exc_info_2.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("url", "invalid_provider"),
+    [
+        ("https://youtu.be/dQw4w9WgXcQ", "vk"),
+        (
+            "https://rutube.ru/video/a1b2c3d4e5f60718293a4b5c6d7e8f90/",
+            "youtube",
+        ),
+        ("https://vkvideo.ru/video-22822305_456239018", "rutube"),
+        ("https://music.yandex.ru/album/123/track/456", "youtube"),
+        ("https://cdn.example.org/audio.mp3", "vk"),
+    ],
+)
+def test_media_item_provider_mismatch_comprehensive(url: str, invalid_provider: str) -> None:
+    """
+    Комплексная параметризованная проверка несовпадения заявленного провайдера с URL.
+    Гарантирует возбуждение ValidationError, если переданный provider не соответствует хосту URL.
+    """
+    media_type = "audio" if ("audio" in url or "music" in url) else "video"
+    with pytest.raises(ValidationError) as exc_info:
+        MediaItem(
+            media_type=media_type,
+            url=url,
+            provider=invalid_provider,
+        )
+    assert "не соответствует" in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_media_item_incompatible_media_type_raises_validation_error() -> None:
+    """
+    Проверка согласования типов контента и возможностей платформы:
+    аудио под видом видео и видео под видом аудио вызывают ValidationError.
+    """
+    # Передача аудио-ресурса Яндекс.Музыки в категорию video
+    with pytest.raises(ValidationError) as exc_info_1:
+        MediaItem(
+            media_type="video",
+            url="https://music.yandex.ru/album/123/track/456",
+        )
+    assert "не является видеозаписью" in str(exc_info_1.value)
+
+    # Передача видеохостинга YouTube в категорию audio
+    with pytest.raises(ValidationError) as exc_info_2:
+        MediaItem(
+            media_type="audio",
+            url="https://youtu.be/dQw4w9WgXcQ",
+        )
+    assert "не является аудиозаписью" in str(exc_info_2.value)
+
+
+@pytest.mark.unit
+def test_media_item_incompatible_types_and_providers_matrix() -> None:
+    """
+    Проверка матрицы несовместимости media_type и URL/провайдера.
+    Блокирует регистрацию видео как аудио, аудио как видео,
+    а также указание провайдеров для картинок и ссылок.
+    """
+    # 1. Видео с адресом Яндекс.Музыки (ошибка: ресурс не является видеозаписью)
+    with pytest.raises(ValidationError) as exc_1:
+        MediaItem(
+            media_type="video",
+            url="https://music.yandex.ru/album/123/track/456",
+        )
+    assert "не является видеозаписью" in str(exc_1.value)
+
+    # 2. Аудио с адресом YouTube (ошибка: ресурс не является аудиозаписью)
+    with pytest.raises(ValidationError) as exc_2:
+        MediaItem(
+            media_type="audio",
+            url="https://youtu.be/dQw4w9WgXcQ",
+        )
+    assert "не является аудиозаписью" in str(exc_2.value)
+
+    # 3. Видео с прямым аудио-файлом (ошибка: ресурс не является видеозаписью)
+    with pytest.raises(ValidationError) as exc_3:
+        MediaItem(
+            media_type="video",
+            url="https://cdn.example.org/audio.mp3",
+        )
+    assert "не является видеозаписью" in str(exc_3.value)
+
+    # 4. Аудио с адресом Rutube (ошибка: ресурс не является аудиозаписью)
+    with pytest.raises(ValidationError) as exc_4:
+        MediaItem(
+            media_type="audio",
+            url="https://rutube.ru/video/a1b2c3d4e5f60718293a4b5c6d7e8f90/",
+        )
+    assert "не является аудиозаписью" in str(exc_4.value)
+
+    # 5. Картинка со сторонним провайдером rutube (ошибка: провайдер недопустим)
+    with pytest.raises(ValidationError) as exc_5:
+        MediaItem(
+            media_type="image",
+            url="https://example.com/pic.png",
+            provider="rutube",
+        )
+    assert "недопустим" in str(exc_5.value)
+
+    # 6. Внешняя ссылка со сторонним провайдером vk (ошибка: провайдер недопустим)
+    with pytest.raises(ValidationError) as exc_6:
+        MediaItem(
+            media_type="link",
+            url="https://example.com/info",
+            provider="vk",
+        )
+    assert "недопустим" in str(exc_6.value)
+
+
+@pytest.mark.unit
+def test_media_item_client_embed_url_is_ignored_and_overwritten() -> None:
+    """
+    Проверка защиты от инъекций вредоносных адресов встраивания со стороны клиента.
+    Сервер обязан полностью игнорировать входящее значение embed_url и пересчитывать его заново.
+    """
+    # 1. Попытка передачи поддельного iframe-URL для YouTube
+    video_payload = {
+        "media_type": "video",
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "embed_url": "https://evil-hacker.com/iframe",
+    }
+    item_video = MediaItem.model_validate(video_payload)
+    assert item_video.embed_url == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+
+    # 2. Попытка передачи embed_url для статического изображения
+    image_payload = {
+        "media_type": "image",
+        "url": "https://example.com/pic.png",
+        "embed_url": "https://evil.com",
+    }
+    item_image = MediaItem.model_validate(image_payload)
+    assert item_image.embed_url is None
+
+
+@pytest.mark.unit
+def test_media_item_embed_url_tampering_protection_in_event_schemas() -> None:
+    """
+    Проверка защиты от подмены embed_url клиентом в MediaItem, EventCreate и EventUpdate.
+    Сервер обязан полностью игнорировать клиентский embed_url и вычислять его заново
+    либо сбрасывать в None для прямых файлов, картинок и ссылок.
+    """
+    # 1. Валидация через словарь MediaItem.model_validate с вредоносным embed_url
+    item_yt = MediaItem.model_validate(
+        {
+            "media_type": "video",
+            "url": "https://youtu.be/dQw4w9WgXcQ",
+            "embed_url": "https://evil-attacker.org/hack",
+        }
+    )
+    assert item_yt.embed_url == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+
+    # 2. Прямое аудио: сброс переданного embed_url в None
+    item_audio = MediaItem.model_validate(
+        {
+            "media_type": "audio",
+            "url": "https://cdn.example.org/audio.mp3",
+            "embed_url": "https://evil.com/fake",
+        }
+    )
+    assert item_audio.embed_url is None
+
+    # 3. Внешняя ссылка: сброс переданного embed_url в None
+    item_link = MediaItem.model_validate(
+        {
+            "media_type": "link",
+            "url": "https://example.com/page",
+            "embed_url": "https://evil.com",
+        }
+    )
+    assert item_link.embed_url is None
+
+    # 4. Проверка внутри EventCreate
+    create_payload = {
+        "title": "Событие с поддельным embed",
+        "start_date": 1000,
+        "category": EventCategory.CULTURE,
+        "media_payload": [
+            {
+                "media_type": "video",
+                "url": "https://youtu.be/dQw4w9WgXcQ",
+                "embed_url": "https://evil.com",
+            }
+        ],
+    }
+    event_create = EventCreate.model_validate(create_payload)
+    assert event_create.media_payload is not None
+    assert (
+        event_create.media_payload[0].embed_url
+        == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    )
+
+    # 5. Проверка внутри EventUpdate
+    update_payload = {
+        "media_payload": [
+            {
+                "media_type": "video",
+                "url": "https://youtu.be/dQw4w9WgXcQ",
+                "embed_url": "https://evil.com",
+            }
+        ]
+    }
+    event_update = EventUpdate.model_validate(update_payload)
+    assert event_update.media_payload is not None
+    assert (
+        event_update.media_payload[0].embed_url
+        == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    )
+
+
+@pytest.mark.unit
+def test_media_payload_boundary_limits_in_payload_and_events() -> None:
+    """
+    Проверка граничных условий лимита коллекции media_payload (ровно 20 элементов).
+    Коллекция из 20 элементов валидируется успешно, 21 элемент вызывает ValidationError.
+    Проверяются модели MediaPayload, EventCreate и EventUpdate.
+    """
+    items_20 = [
+        MediaItem(
+            media_type="image",
+            url=f"https://example.com/item_{i}.png",
+            title=f"Элемент {i}",
+        )
+        for i in range(20)
+    ]
+    items_21 = [
+        MediaItem(
+            media_type="image",
+            url=f"https://example.com/item_{i}.png",
+            title=f"Элемент {i}",
+        )
+        for i in range(21)
+    ]
+
+    # 1. MediaPayload с ровно 20 элементами
+    payload_20 = MediaPayload(items_20)
+    assert len(payload_20) == 20
+
+    # 2. MediaPayload с 21 элементом возбуждает ValidationError
+    with pytest.raises(ValidationError):
+        MediaPayload(items_21)
+
+    # 3. Пустая коллекция MediaPayload
+    payload_empty = MediaPayload([])
+    assert len(payload_empty) == 0
+
+    # 4. EventCreate со списком из 20 элементов
+    event_create_20 = EventCreate(
+        title="Событие с 20 медиа",
+        start_date=1000,
+        category=EventCategory.SCIENCE,
+        media_payload=items_20,
+    )
+    assert event_create_20.media_payload is not None
+    assert len(event_create_20.media_payload) == 20
+
+    # 5. EventCreate со списком из 21 элемента
+    with pytest.raises(ValidationError):
+        EventCreate(
+            title="Событие с 21 медиа",
+            start_date=1000,
+            category=EventCategory.SCIENCE,
+            media_payload=items_21,
+        )
+
+    # 6. EventUpdate со списком из 20 элементов
+    event_update_20 = EventUpdate(media_payload=items_20)
+    assert event_update_20.media_payload is not None
+    assert len(event_update_20.media_payload) == 20
+
+    # 7. EventUpdate со списком из 21 элемента
+    with pytest.raises(ValidationError):
+        EventUpdate(media_payload=items_21)
+
+
+@pytest.mark.unit
+def test_media_item_image_and_link_rules() -> None:
+    """
+    Проверка правил валидации для статических изображений и внешних ссылок:
+    встраивание во фрейм отключено (embed_url is None), сторонние провайдеры запрещены.
+    """
+    # 1. Валидное изображение без параметров встраивания
+    item_img = MediaItem(
+        media_type="image",
+        url="https://example.com/banner.jpg",
+    )
+    assert item_img.embed_url is None
+
+    # 2. Валидная внешняя гиперссылка
+    item_link = MediaItem(
+        media_type="link",
+        url="https://wikipedia.org/wiki/Rome",
+    )
+    assert item_link.embed_url is None
+
+    # 3. Изображение с недопустимым сторонним видео-провайдером
+    with pytest.raises(ValidationError) as exc_info:
+        MediaItem(
+            media_type="image",
+            url="https://example.com/pic.png",
+            provider="youtube",
+        )
+    assert "недопустим" in str(exc_info.value)
+
+
+# --- Тестирование служебных схем мониторинга ---
 
 
 @pytest.mark.unit

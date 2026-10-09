@@ -244,3 +244,49 @@ def test_crud_layer_does_not_manage_transactions() -> None:
                     f"слой CRUD не должен управлять транзакциями (обнаружен вызов '{node.func.attr}'). "
                     f"Разрешено использовать только 'session.flush()'."
                 )
+
+
+@pytest.mark.unit
+def test_media_parser_service_strict_isolation() -> None:
+    """
+    Проверка абсолютной архитектурной изоляции сервиса app/services/media_parser.py.
+    Модуль парсинга медиа-ресурсов является чистым доменным сервисом без состояния
+    и не должен зависеть от веб-фреймворков (fastapi, starlette), ORM SQLAlchemy,
+    а также слоев app.crud, app.models, app.schemas, app.services и app.api.
+    Единственным разрешенным внутренним импортом является пакет app.core.
+    """
+    media_parser_file = APP_DIR / "services" / "media_parser.py"
+    if not media_parser_file.exists():
+        pytest.skip("Файл app/services/media_parser.py еще не создан.")
+
+    imports = get_imported_modules(media_parser_file)
+
+    forbidden_dependencies = (
+        "fastapi",
+        "starlette",
+        "sqlalchemy",
+        "app.crud",
+        "crud",
+        "app.models",
+        "app.schemas",
+        "app.api",
+    )
+
+    for imported_module in imports:
+        # Проверка блокировки внешних фреймворков и недопустимых слоев
+        for forbidden in forbidden_dependencies:
+            if imported_module == forbidden or imported_module.startswith(f"{forbidden}."):
+                pytest.fail(
+                    f"Нарушение строгой изоляции в сервисе media_parser.py: "
+                    f"модуль не должен зависеть от веб-фреймворков, ORM или слоя CRUD. "
+                    f"Обнаружен запрещенный импорт '{imported_module}'."
+                )
+
+        # Контроль внутренних проектных зависимостей: разрешен строго подпакет app.core
+        if imported_module.startswith("app."):
+            if not (imported_module == "app.core" or imported_module.startswith("app.core.")):
+                pytest.fail(
+                    f"Нарушение контракта внутренних зависимостей в media_parser.py: "
+                    f"сервис может импортировать только модули из 'app.core' (доменные исключения). "
+                    f"Обнаружен недопустимый внутренний импорт '{imported_module}'."
+                )

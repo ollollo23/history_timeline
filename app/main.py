@@ -26,6 +26,7 @@ from app.core.exceptions import (
     InvalidParentRankError,
 )
 from app.core.logger import logger, setup_logging
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 # Первичная инициализация структурированного логирования приложения
 setup_logging()
@@ -175,6 +176,9 @@ async def validate_request_body_size(
         )
     return await call_next(request)
 
+
+# Установка заголовков безопасности HTTP и политики Content Security Policy (CSP)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Сжатие ответов, превышающих 1000 байт, алгоритмом Gzip для экономии трафика
 app.add_middleware(

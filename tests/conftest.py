@@ -1,8 +1,8 @@
 """
 Корневой конфигурационный модуль фикстур и хуков pytest для проекта History Timeline.
 Обеспечивает перехват и протоколирование системного вывода в файл project_info/pytest_last_run.txt,
-принудительную цветную подсветку консоли, запуск ASGI-приложения через LifespanManager
-и изоляцию тестового контура от внешней БД.
+принудительную цветную подсветку консоли, запуск ASGI-приложения через LifespanManager,
+автоматическую очистку пула соединений SQLAlchemy и изоляцию тестового контура от внешней БД.
 """
 
 import atexit
@@ -18,18 +18,18 @@ import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
-from app.core.database.database import get_db, get_db_engine
+from app.core.database.database import engine, get_db, get_db_engine
 from app.main import app
 
 # Регулярное выражение стандарта ECMA-48 для удаления ANSI-последовательностей форматирования терминала
 ANSI_ESCAPE_REGEX = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 # Реестр активных потоков-разветвителей и флаг защиты от повторной установки перехватчиков
-_tee_writers: list[TeeWriter] = []
+_tee_writers: list[Any] = []
 _tee_installed: bool = False
 
 
-# механизм потокового разветвителя TeeWriter опирается на то, что стандартный поток вывода
+# Механизм потокового разветвителя TeeWriter опирается на то, что стандартный поток вывода
 # не перехвачен pytest. Работоспособность логирования критически зависит от наличия
 # флага -s (--capture=no) в строке addopts файла pyproject.toml.
 # Удаление данного флага приведет к блокировке передачи вывода в файловый дескриптор отчета.
@@ -120,7 +120,7 @@ def _close_tee_writers() -> None:
         writer.close()
 
 
-# механизм потокового разветвителя TeeWriter опирается на то, что стандартный поток вывода
+# Механизм потокового разветвителя TeeWriter опирается на то, что стандартный поток вывода
 # не перехвачен pytest. Работоспособность логирования критически зависит от наличия
 # флага -s (--capture=no) в строке addopts файла pyproject.toml.
 # Удаление данного флага приведет к блокировке передачи вывода в файловый дескриптор отчета.
@@ -192,6 +192,19 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     _close_tee_writers()
 
 
+@pytest_asyncio.fixture(autouse=True, scope="function")
+async def dispose_engine_after_test() -> AsyncGenerator[None]:
+    """
+    Автоматическая асинхронная фикстура для освобождения ресурсов пула соединений SQLAlchemy.
+    Выполняет явный сброс engine.dispose(close=True) после каждого теста, предотвращая
+    утечку асинхронных сокетов asyncpg и появление предупреждения
+    RuntimeWarning: coroutine 'Connection._cancel' was never awaited.
+    """
+    yield
+    if engine is not None:
+        await engine.dispose(close=True)
+
+
 @pytest_asyncio.fixture
 async def mock_db_session() -> AsyncMock:
     """
@@ -228,7 +241,7 @@ async def mock_db_engine() -> MagicMock:
     конфигурации исключений в юнит-тестах эндпоинта /health.
     """
     # Создание базового мок-объекта движка базы данных
-    engine = MagicMock()
+    mock_engine = MagicMock()
 
     # Инициализация мок-объекта асинхронного сетевого соединения
     connection = AsyncMock()
@@ -236,13 +249,13 @@ async def mock_db_engine() -> MagicMock:
     connection.close = AsyncMock()
 
     # Настройка асинхронного контекстного менеджера: async with engine.connect() as connection
-    engine.connect.return_value.__aenter__.return_value = connection
-    engine.connect.return_value.__aexit__.return_value = None
+    mock_engine.connect.return_value.__aenter__.return_value = connection
+    mock_engine.connect.return_value.__aexit__.return_value = None
 
     # Фиксация прямой ссылки на соединение для настройки поведения в тестах
-    engine._mock_connection = connection
+    mock_engine._mock_connection = connection
 
-    return engine
+    return mock_engine
 
 
 @pytest_asyncio.fixture

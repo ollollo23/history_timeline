@@ -10,6 +10,11 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.constants import (
+    DEFAULT_EMBED_ALLOWED_HOSTS,
+    EVENT_DESCRIPTION_MAX_LENGTH,
+)
+
 # Определение абсолютного пути к корневой директории проекта (history_timeline)
 BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -46,6 +51,14 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = Field(
         default=2097152,
         description="Максимальный размер тела входящего запроса в байтах (2 МБ)",
+    )
+    event_description_max_length: int = Field(
+        default=EVENT_DESCRIPTION_MAX_LENGTH,
+        description="Максимальная допустимая длина исторического описания события в символах",
+    )
+    embed_allowed_hosts: list[str] = Field(
+        default=list(DEFAULT_EMBED_ALLOWED_HOSTS),
+        description="Список разрешенных доменов для встраивания внешних медиа-ресурсов",
     )
 
     # Обязательные параметры подключения к PostgreSQL

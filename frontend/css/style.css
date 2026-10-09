@@ -13,12 +13,59 @@
     --color-badge-neutral: #52525b;
     --color-danger: #ef4444;
 
+    /* Динамические свойства, переопределяемые из JavaScript для цветового кодирования направлений и категорий */
+    --layer-color: var(--color-category-other);
+    --badge-color: var(--color-category-other);
+
     /* Палитра проверена: WCAG 2.1 контраст >= 3:1 к фону #121214, различимость при дальтонизме Machado 2009 Delta E >= 11 */
     --color-category-culture: #854ece;
     --color-category-politics: #c83841;
     --color-category-economy: #c08933;
     --color-category-science: #1794a0;
     --color-category-other: #b0b0b8;
+}
+
+/* Переопределение переменных для светлой темы оформления (Light Theme) */
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f4f4f5;
+        --bg-accent: #e4e4e7;
+        --text-primary: #09090b;
+        --text-secondary: #52525b;
+        --color-accent: #2563eb;
+        --color-success: #059669;
+        --border-color: #d4d4d8;
+        --color-badge-neutral: #71717a;
+        --color-danger: #dc2626;
+        --layer-color: var(--color-category-other);
+        --badge-color: var(--color-category-other);
+        --color-category-culture: #7c3aed;
+        --color-category-politics: #b91c1c;
+        --color-category-economy: #b45309;
+        --color-category-science: #0e7490;
+        --color-category-other: #64748b;
+    }
+}
+
+:root[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f4f4f5;
+    --bg-accent: #e4e4e7;
+    --text-primary: #09090b;
+    --text-secondary: #52525b;
+    --color-accent: #2563eb;
+    --color-success: #059669;
+    --border-color: #d4d4d8;
+    --color-badge-neutral: #71717a;
+    --color-danger: #dc2626;
+    --layer-color: var(--color-category-other);
+    --badge-color: var(--color-category-other);
+    --color-category-culture: #7c3aed;
+    --color-category-politics: #b91c1c;
+    --color-category-economy: #b45309;
+    --color-category-science: #0e7490;
+    --color-category-other: #64748b;
 }
 
 /* Сброс базовых браузерных отступов и фиксация блочной модели расчета размеров */
@@ -169,7 +216,7 @@ body {
     width: 10px;
     height: 10px;
     border-radius: 2px;
-    background-color: var(--layer-color);
+    background-color: var(--layer-color, var(--color-category-other));
     flex-shrink: 0;
 }
 
@@ -558,7 +605,6 @@ body {
     color: var(--text-primary);
     line-height: 1.5;
     margin-bottom: 1rem;
-    white-space: pre-wrap;
     word-break: break-word;
 }
 
@@ -663,4 +709,684 @@ body {
     font-size: 0.8rem;
     color: var(--color-danger);
     margin-top: 0.5rem;
+}
+
+/* ==============================================================================
+   СТИЛИЗАЦИЯ ФОРМАТИРОВАННОГО КОНТЕНТА MARKDOWN
+   ============================================================================== */
+
+/* Заголовки уровней h3, h4, h5 в форматированных блоках */
+.timeline-detail-description h3,
+.timeline-detail-description h4,
+.timeline-detail-description h5,
+.markdown-editor-preview h3,
+.markdown-editor-preview h4,
+.markdown-editor-preview h5 {
+    color: var(--text-primary);
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+    line-height: 1.3;
+}
+
+/* Абзацы текста Markdown */
+.timeline-detail-description p,
+.markdown-editor-preview p {
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+/* Маркированные и нумерованные списки */
+.timeline-detail-description ul,
+.timeline-detail-description ol,
+.markdown-editor-preview ul,
+.markdown-editor-preview ol {
+    padding-left: 1.25rem;
+    margin-bottom: 0.75rem;
+}
+
+/* Элементы списков */
+.timeline-detail-description li,
+.markdown-editor-preview li {
+    margin-bottom: 0.25rem;
+}
+
+/* Блоки цитирования */
+.timeline-detail-description blockquote,
+.markdown-editor-preview blockquote {
+    border-left: 3px solid var(--color-accent);
+    padding-left: 0.75rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Инлайн-код */
+.timeline-detail-description code,
+.markdown-editor-preview code {
+    font-family: monospace;
+    background: var(--bg-accent);
+    border-radius: 3px;
+    padding: 0.15rem 0.35rem;
+    color: var(--color-accent);
+    font-size: 0.85em;
+}
+
+/* Многострочные блоки исходного кода */
+.timeline-detail-description pre,
+.markdown-editor-preview pre {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.75rem;
+    overflow-x: auto;
+    margin-bottom: 0.75rem;
+}
+
+/* Вложенный код внутри блока pre без дублирования фона */
+.timeline-detail-description pre code,
+.markdown-editor-preview pre code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    border-radius: 0;
+}
+
+/* Безопасные гиперссылки */
+.timeline-detail-description a,
+.markdown-editor-preview a {
+    color: var(--color-accent);
+    text-decoration: none;
+    word-break: break-all;
+}
+
+.timeline-detail-description a:hover,
+.markdown-editor-preview a:hover {
+    text-decoration: underline;
+}
+
+/* Небезопасные ссылки, нейтрализованные политикой linkPolicy */
+.markdown-unsafe-link {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+    cursor: not-allowed;
+}
+
+/* Тематический разделитель hr */
+.timeline-detail-description hr,
+.markdown-editor-preview hr {
+    border: none;
+    height: 1px;
+    background: var(--border-color);
+    margin: 1rem 0;
+}
+
+/* Предупреждение об усечении вывода узлов при превышении MAX_RENDER_NODES */
+.markdown-truncation-notice {
+    color: var(--color-danger);
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+/* ==============================================================================
+   СТИЛИЗАЦИЯ МЕДИА-КАРТОЧЕК И ПРОПОРЦИЙ 16:9
+   ============================================================================== */
+
+/* Секция медиа-материалов в панели деталей */
+.timeline-detail-media {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Заголовок секции медиа */
+.timeline-detail-media-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+/* Список карточек вложений */
+.timeline-detail-media-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+/* Карточка медиа-вложения */
+.timeline-media-card {
+    background: var(--bg-accent);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    overflow: hidden;
+}
+
+/* Шапка карточки медиа */
+.timeline-media-header {
+    margin-bottom: 0.5rem;
+}
+
+/* Название медиа-материала */
+.timeline-media-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    word-break: break-word;
+}
+
+/* Фасад отложенной загрузки плеера */
+.timeline-media-facade {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 160px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    border: 1px dashed var(--border-color);
+    padding: 1rem;
+    gap: 0.5rem;
+}
+
+/* Кнопка запуска воспроизведения на фасаде */
+.timeline-media-play-btn {
+    background: var(--color-accent);
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    transition: opacity 0.15s ease;
+}
+
+.timeline-media-play-btn:hover {
+    opacity: 0.9;
+}
+
+/* Обертка фрейма с сохранением кинематографических пропорций 16:9 */
+.timeline-media-frame-wrapper {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000000;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+/* Фрейм плеера с абсолютным позиционированием */
+.timeline-media-iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Контейнер нативного аудиоплеера */
+.timeline-media-audio-wrapper {
+    width: 100%;
+    margin-top: 0.25rem;
+}
+
+/* Элемент аудио */
+.timeline-media-audio {
+    width: 100%;
+    height: 36px;
+}
+
+/* Резервная ссылка на первоисточник */
+.timeline-media-source-link {
+    display: inline-flex;
+    font-size: 0.8rem;
+    color: var(--color-accent);
+    text-decoration: none;
+    margin-top: 0.25rem;
+}
+
+.timeline-media-source-link:hover {
+    text-decoration: underline;
+}
+
+/* Сообщение о недопустимом адресе источника */
+.timeline-media-unsafe {
+    font-size: 0.8rem;
+    color: var(--color-danger);
+}
+
+/* ==============================================================================
+   СТИЛИЗАЦИЯ РЕДАКТОРА MARKDOWN
+   ============================================================================== */
+
+/* Корневой контейнер редактора Markdown */
+.markdown-editor {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Панель переключения вкладок */
+.markdown-editor-tabs {
+    display: flex;
+    background: var(--bg-accent);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Кнопка вкладки */
+.markdown-editor-tab {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-family: inherit;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.markdown-editor-tab:hover {
+    color: var(--text-primary);
+}
+
+.markdown-editor-tab[aria-selected="true"],
+.markdown-editor-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--color-accent);
+}
+
+/* Панель инструментов форматирования */
+.markdown-editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Кнопки панели инструментов */
+.markdown-editor-btn,
+.markdown-editor-tool-btn {
+    background: var(--bg-accent);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.45rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.markdown-editor-btn:hover,
+.markdown-editor-tool-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--color-accent);
+}
+
+/* Панель содержимого редактора */
+.markdown-editor-panel {
+    width: 100%;
+}
+
+/* Поле ввода текста */
+.markdown-editor-textarea {
+    width: 100%;
+    min-height: 200px;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: monospace;
+    border: none;
+    outline: none;
+    resize: vertical;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Область предварительного просмотра */
+.markdown-editor-preview {
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+}
+
+/* Подвал редактора со счетчиком символов */
+.markdown-editor-footer {
+    padding: 0.35rem 0.75rem;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    text-align: right;
+}
+
+/* Текст счетчика */
+.markdown-editor-counter {
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Предупреждающее состояние счетчика (> 90%) */
+.markdown-editor-counter.counter-warning,
+.counter-warning {
+    color: var(--color-category-economy);
+}
+
+/* Критическое состояние счетчика (превышение лимита) */
+.markdown-editor-counter.counter-danger,
+.counter-danger {
+    color: var(--color-danger);
+}
+
+/* ==============================================================================
+   СТИЛИЗАЦИЯ ИНТЕРАКТИВНОЙ ФОРМЫ СОЗДАНИЯ СОБЫТИЯ
+   ============================================================================== */
+
+/* Корневая форма */
+.create-event-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+/* Группа поля ввода */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+/* Метка поля */
+.form-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+/* Поля ввода и селекторы */
+.form-input,
+.form-select,
+.form-control {
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 0.15s ease;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-control:focus {
+    border-color: var(--color-accent);
+}
+
+/* Сетка для смежных полей в две колонки */
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+/* Секция медиа-материалов формы */
+.event-media-section,
+.form-media-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+/* Шапка секции медиа */
+.event-media-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Строка параметров медиа-вложения */
+.event-media-row,
+.form-media-item {
+    display: grid;
+    grid-template-columns: 110px 1fr 1fr auto;
+    gap: 0.5rem;
+    align-items: start;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+/* Кнопка добавления медиа */
+.add-media-btn,
+#add-media-btn {
+    background: var(--bg-accent);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 4px;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.15s ease;
+}
+
+.add-media-btn:hover,
+#add-media-btn:hover {
+    border-color: var(--color-accent);
+}
+
+.add-media-btn:disabled,
+#add-media-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: var(--border-color);
+}
+
+/* Кнопка удаления строки медиа */
+.remove-media-btn,
+.form-media-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-danger);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.25rem;
+    line-height: 1;
+}
+
+/* Подсказка валидации медиа-адреса */
+.media-hint,
+.form-media-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    min-height: 1rem;
+}
+
+.media-hint-error {
+    color: var(--color-danger);
+}
+
+/* Текст ошибки под полем ввода */
+.form-error-text,
+.form-field-error {
+    font-size: 0.75rem;
+    color: var(--color-danger);
+    margin-top: 0.2rem;
+}
+
+/* Системное уведомление формы */
+.form-status-message {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+}
+
+.form-status-success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid var(--color-success);
+    color: var(--color-success);
+}
+
+.form-status-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--color-danger);
+    color: var(--color-danger);
+}
+
+.form-status-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid var(--color-category-economy);
+    color: var(--color-category-economy);
+}
+
+/* Кнопка публикации события */
+.submit-event-btn,
+#submit-event-btn {
+    padding: 0.6rem 1.5rem;
+    background: var(--color-accent);
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    align-self: flex-start;
+    font-family: inherit;
+    transition: opacity 0.15s ease;
+}
+
+.submit-event-btn:hover,
+#submit-event-btn:hover {
+    opacity: 0.9;
+}
+
+.submit-event-btn:disabled,
+#submit-event-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* Универсальные стили кнопок действий */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-primary {
+    background-color: var(--color-accent);
+    color: #ffffff;
+}
+
+.btn-secondary {
+    background-color: var(--bg-accent);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-danger {
+    background-color: transparent;
+    color: var(--color-danger);
+}
+
+/* ==============================================================================
+   СЛУЖЕБНЫЕ КЛАССЫ ВЗАМЕН ИНЛАЙН-СТИЛЕЙ (ТРЕБОВАНИЕ CSP)
+   ============================================================================== */
+
+/* Заглушка интерактивной формы */
+.form-placeholder {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    background: var(--bg-accent);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+/* Текст заглушки */
+.form-placeholder-text {
+    color: var(--text-secondary);
+}
+
+/* Карточка системной ошибки маршрутизатора */
+.router-error-card {
+    border-color: var(--color-danger);
+}
+
+/* Заголовок системной ошибки маршрутизатора */
+.router-error-title {
+    color: var(--color-danger);
+}
+
+/* Блок технических деталей ошибки маршрутизатора */
+.router-error-details {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-accent);
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: #f87171;
+    word-break: break-word;
+}
+
+/* Ссылка возврата на безопасную страницу */
+.router-error-link {
+    margin-top: 1.5rem;
+    color: var(--color-accent);
+}
+
+/* ==============================================================================
+   АДАПТИВНОСТЬ ДЛЯ МОБИЛЬНЫХ ЭКРАНОВ
+   ============================================================================== */
+
+@media (max-width: 768px) {
+    .app-header {
+        padding: 1rem;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .timeline-detail-panel {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .event-media-row,
+    .form-media-item {
+        grid-template-columns: 1fr;
+        gap: 0.4rem;
+    }
+
+    .markdown-editor-toolbar {
+        gap: 0.2rem;
+    }
 }
