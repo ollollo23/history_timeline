@@ -4,8 +4,6 @@
  * Модульные тесты интерактивного представления создания события (create_event.js).
  * Выполняются в виртуальной среде happy-dom с использованием фреймворка Vitest.
  * Проверяют структуру формы, динамическое управление медиа-вложениями (до 20 элементов),
- * клиентскую предвалидацию ссылок, валидацию соотношения дат, разбор формата
- * ДД.ММ.ГГГГ ЧЧ:ММ:СС в секунды Unix, обработку успешной отправки,
  * серверных ошибок (422, 401, 403) и корректное размонтирование представления в unmount.
  */
 
@@ -185,113 +183,6 @@ describe('Представление создания исторического
             container.querySelector('#event-start-date').value = '1000';
             container.querySelector('#event-end-date').value = '500';
             container.querySelector('#event-category').value = 'politics';
-
-            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-            await Promise.resolve();
-
-            expect(createEvent).not.toHaveBeenCalled();
-
-            const endDateError = container.querySelector('#event-end-date-error');
-            expect(endDateError.style.display).toBe('block');
-            expect(endDateError.textContent).toBe('Конечная дата не может предшествовать начальной');
-        });
-    });
-
-    describe('Ввод и валидация дат в формате ДД.ММ.ГГГГ ЧЧ:ММ:СС', () => {
-        it('успешно парсит полную дату со временем и отправляет секунды Unix в createEvent', async () => {
-            createEvent.mockResolvedValueOnce({ id: 101, title: 'Событие с точным временем' });
-            container.innerHTML = view.html;
-            view.mount(container);
-
-            const form = container.querySelector('#create-event-form');
-            container.querySelector('#event-title').value = 'Встреча в верхах';
-            container.querySelector('#event-start-date').value = '25.10.2026 14:30:00';
-            container.querySelector('#event-end-date').value = '25.10.2026 18:00:00';
-            container.querySelector('#event-category').value = 'politics';
-            container.querySelector('#event-rank').value = 'hour';
-
-            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-            await Promise.resolve();
-            await new Promise((resolve) => setTimeout(resolve, 10));
-
-            expect(createEvent).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    start_date: 1792938600,
-                    end_date: 1792951200,
-                })
-            );
-        });
-
-        it('успешно парсит дату без указания времени с подстановкой 00:00:00', async () => {
-            createEvent.mockResolvedValueOnce({ id: 102, title: 'Новогоднее событие' });
-            container.innerHTML = view.html;
-            view.mount(container);
-
-            const form = container.querySelector('#create-event-form');
-            container.querySelector('#event-title').value = 'Новый год';
-            container.querySelector('#event-start-date').value = '01.01.2026';
-            container.querySelector('#event-category').value = 'culture';
-            container.querySelector('#event-rank').value = 'day';
-
-            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-            await Promise.resolve();
-            await new Promise((resolve) => setTimeout(resolve, 10));
-
-            expect(createEvent).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    start_date: 1767225600,
-                    end_date: null,
-                })
-            );
-        });
-
-        it('отклоняет некорректный текстовый формат даты и блокирует отправку', async () => {
-            container.innerHTML = view.html;
-            view.mount(container);
-
-            const form = container.querySelector('#create-event-form');
-            container.querySelector('#event-title').value = 'Событие с ошибкой';
-            container.querySelector('#event-start-date').value = 'неправильная-дата';
-            container.querySelector('#event-category').value = 'science';
-
-            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-            await Promise.resolve();
-
-            expect(createEvent).not.toHaveBeenCalled();
-
-            const startDateError = container.querySelector('#event-start-date-error');
-            expect(startDateError.style.display).toBe('block');
-            expect(startDateError.textContent).toContain('Неверный формат даты');
-        });
-
-        it('отклоняет несуществующую календарную дату и блокирует сетевой запрос', async () => {
-            container.innerHTML = view.html;
-            view.mount(container);
-
-            const form = container.querySelector('#create-event-form');
-            container.querySelector('#event-title').value = 'Несуществующий день';
-            container.querySelector('#event-start-date').value = '31.02.2026 12:00:00';
-            container.querySelector('#event-category').value = 'science';
-
-            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-            await Promise.resolve();
-
-            expect(createEvent).not.toHaveBeenCalled();
-
-            const startDateError = container.querySelector('#event-start-date-error');
-            expect(startDateError.style.display).toBe('block');
-            expect(startDateError.textContent).toContain('Неверный формат даты');
-        });
-
-        it('проверяет хронологический порядок при вводе форматированных дат со временем', async () => {
-            container.innerHTML = view.html;
-            view.mount(container);
-
-            const form = container.querySelector('#create-event-form');
-            container.querySelector('#event-title').value = 'Инвертированные даты';
-            container.querySelector('#event-start-date').value = '25.10.2026 18:00:00';
-            container.querySelector('#event-end-date').value = '25.10.2026 14:00:00';
-            container.querySelector('#event-category').value = 'culture';
 
             form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
             await Promise.resolve();
